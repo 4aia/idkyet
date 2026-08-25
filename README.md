@@ -1,3 +1,5 @@
+Deutsch | [English](./README.en.md)
+
 # InfraNode
 
 [![GitHub stars](https://img.shields.io/github/stars/street1983nk/infranode?style=flat&logo=github)](https://github.com/street1983nk/infranode/stargazers)
@@ -6,69 +8,75 @@
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-dev.infranode%2Finfranode-1f6feb)](https://registry.modelcontextprotocol.io)
 [![Smithery](https://img.shields.io/badge/Smithery-infranode-7c3aed)](https://smithery.ai/server/infranode/infranode)
 
-**The open-data REST API for Germany: a keyless HTTP API for German
-public-infrastructure open data, also available as an MCP server.**
+**Die Open-Data-REST-API für Deutschland: eine HTTP-API ohne API-Key für Open
+Data zur öffentlichen Infrastruktur, auch als MCP-Server verfügbar.**
 
-German cities publish a lot of open data, but every source has its own format,
-fields and quirks, and several need portal registration. InfraNode normalizes
-~20 categories, weather (DWD), air quality (UBA), public transit (incl. realtime
-departures), traffic, electricity price (SMARD), land values (BORIS), parking,
-charging, water levels, demographics, energy and more, for **84+ German cities**
-behind **one** interface. **No API key, no account.** Every response uses one
-canonical `{ data, meta }` envelope with per-record license and attribution. The
-same data is also exposed as an MCP server (12 lean read-only tools covering 67
-data types) for AI agents.
-Start with the one-call `get_city_overview`: it returns a catalog of every data
-type available for a city plus a live highlights snapshot, so agents discover the
-full breadth, not just weather. InfraNode is actively growing, with more data
-types and cities added regularly.
+Deutsche Städte veröffentlichen viel Open Data, aber jede Quelle hat ihr eigenes
+Format, eigene Felder und eigene Eigenheiten, und für mehrere braucht es eine
+Registrierung im jeweiligen Portal. InfraNode normalisiert rund 20 Kategorien,
+Wetter (DWD), Luftqualität (UBA), ÖPNV (inklusive Echtzeit-Abfahrten), Verkehr,
+Strompreis (SMARD), Bodenrichtwerte (BORIS), Parken, Ladeinfrastruktur,
+Pegelstände, Demografie, Energie und mehr, für **84+ deutsche Städte** hinter
+**einer** Schnittstelle. **Kein API-Key, kein Konto.** Jede Antwort nutzt
+denselben kanonischen `{ data, meta }`-Umschlag mit Lizenz und Attribution je
+Datensatz. Dieselben Daten stehen KI-Agenten auch als MCP-Server zur Verfügung
+(12 schlanke Read-only-Tools über 78 Datenarten).
+Der Einstieg ist `get_city_overview`, ein einziger Aufruf: Er liefert einen
+Katalog aller Datenarten, die es für eine Stadt gibt, dazu einen Live-Auszug der
+wichtigsten Werte. So sehen Agenten die volle Breite und nicht nur das Wetter.
+InfraNode wächst laufend, neue Datenarten und Städte kommen regelmäßig dazu.
 
-Sources include the Deutscher Wetterdienst (DWD), Umweltbundesamt (UBA),
-Mobilithek/DELFI, GovData, OpenStreetMap, Bundesnetzagentur, KBA, DIVI and more.
+Zu den Quellen gehören der Deutsche Wetterdienst (DWD), das Umweltbundesamt
+(UBA), Mobilithek/DELFI, der VBB (Verkehrsverbund Berlin-Brandenburg, CC-BY 4.0),
+GovData, OpenStreetMap, die Bundesnetzagentur, das KBA und weitere.
 
-## See it in action
+## Im Einsatz
 
-[![InfraNode live overview for Cologne: current weather, official air quality, DWD warnings, live train departures with delays, roadworks and the full data-type catalog, all from one keyless call](https://infranode.dev/showcase/koeln-live-dashboard.png)](https://infranode.dev)
+[![InfraNode-Live-Übersicht für Köln: aktuelles Wetter, amtliche Luftqualität, DWD-Warnungen, Live-Zugabfahrten mit Verspätungen, Baustellen und der vollständige Katalog der Datenarten, alles aus einem Aufruf ohne API-Key](https://infranode.dev/showcase/koeln-live-dashboard.png)](https://infranode.dev)
 
-*A single `get_city_overview("koeln")` call: current weather, official air
-quality, DWD warnings, live train departures with delays, roadworks and the full
-per-city data catalog, from one keyless endpoint. Try any city live at
+*Ein einziger `get_city_overview("koeln")`-Aufruf: aktuelles Wetter, amtliche
+Luftqualität, DWD-Warnungen, Live-Zugabfahrten mit Verspätungen, Baustellen und
+der vollständige Datenkatalog der Stadt, aus einem Endpoint ohne API-Key. Jede
+Stadt lässt sich live ausprobieren auf
 [infranode.dev](https://infranode.dev).*
 
-## How it works
+## So funktioniert es
 
-One shared HTTP client fans out to the upstream sources, each response is mapped
-into the canonical schema, license-gated with its attribution and cached in Redis
-(with stale-on-error fallback), then served through both a REST API and an MCP
-server. A failing upstream degrades to `source_status`, it never fails the call.
+Ein gemeinsamer HTTP-Client fragt die Upstream-Quellen ab, jede Antwort wird auf
+das kanonische Schema abgebildet, mit ihrer Attribution durch das Lizenz-Gate
+geführt und in Redis zwischengespeichert (mit Stale-on-Error-Fallback), danach
+über eine REST-API und einen MCP-Server ausgeliefert. Fällt eine Quelle aus,
+schlägt sich das in `source_status` nieder. Der Aufruf selbst scheitert nie
+daran.
 
 ```mermaid
 flowchart LR
-    subgraph SRC["25+ German open-data sources"]
+    subgraph SRC["25+ deutsche Open-Data-Quellen"]
         direction TB
-        S1["DWD, UBA<br/>weather, air"]
-        S2["Mobilithek, DELFI, DB<br/>transit, realtime"]
-        S3["SMARD, BNetzA, MaStR<br/>energy"]
-        S4["BORIS, GovData, OSM,<br/>DIVI, KBA, ..."]
+        S1["DWD, UBA<br/>Wetter, Luft"]
+        S2["Mobilithek, DELFI, DB<br/>ÖPNV, Echtzeit"]
+        S3["SMARD, BNetzA, MaStR<br/>Energie"]
+        S4["BORIS, GovData, OSM,<br/>KBA, ..."]
     end
 
-    subgraph CORE["InfraNode core"]
+    subgraph CORE["InfraNode-Kern"]
         direction TB
-        N["Normalize<br/>one canonical schema"] --> L["License-gate<br/>per-record attribution"] --> C["Redis cache<br/>stale-on-error fallback"]
+        N["Normalisieren<br/>ein kanonisches Schema"] --> L["Lizenz-Gate<br/>Attribution je Datensatz"] --> C["Redis-Cache<br/>Stale-on-Error-Fallback"]
     end
 
     SRC --> CORE
-    CORE --> API["REST API<br/>infranode.dev/api/v1<br/>84 cities, keyless"]
-    CORE --> MCP["MCP server<br/>mcp.infranode.dev<br/>12 read-only tools"]
-    API --> APPS["Apps &amp; dashboards"]
-    MCP --> AGENTS["AI agents<br/>Claude, ChatGPT"]
+    CORE --> API["REST-API<br/>infranode.dev/api/v1<br/>84 Städte, ohne API-Key"]
+    CORE --> MCP["MCP-Server<br/>mcp.infranode.dev<br/>12 Read-only-Tools"]
+    API --> APPS["Apps &amp; Dashboards"]
+    MCP --> AGENTS["KI-Agenten<br/>Claude, ChatGPT"]
 ```
 
-> If InfraNode saves you a data integration, a star helps other developers find it.
+> Wenn InfraNode dir eine Datenintegration erspart: Ein Stern hilft anderen Entwicklern, das Projekt zu finden.
 
-## Quickstart
+## Schnellstart
 
-Base URL `https://infranode.dev/api/v1`. No key, no account, just call it:
+Basis-URL `https://infranode.dev/api/v1`. Kein Key, kein Konto, einfach
+aufrufen:
 
 ```bash
 curl https://infranode.dev/api/v1/cities/koeln/weather
@@ -87,59 +95,105 @@ curl https://infranode.dev/api/v1/cities/koeln/weather
 }
 ```
 
-Every response follows the same `{ data, meta }` envelope: each record carries
-its `attribution` (license + source), and `meta.source_status` tells you whether
-the upstream source delivered data, so a dead source degrades gracefully instead
-of failing the call.
+Jede Antwort folgt demselben `{ data, meta }`-Umschlag: Jeder Datensatz trägt
+seine `attribution` (Lizenz und Quelle), und `meta.source_status` sagt, ob die
+Upstream-Quelle Daten geliefert hat. Eine tote Quelle degradiert damit sauber,
+statt den Aufruf scheitern zu lassen.
 
-> Tip: call `/api/v1/cities` first to discover valid city slugs (e.g. `koeln`,
-> `berlin`, `hamburg`), then call any city-scoped endpoint.
+Über alle Datenarten hinweg sind Feldnamen snake_case und englisch, und dasselbe
+Konzept heißt immer gleich: `post_code`, `street`, `house_number`, `place`,
+`name`, `start`, `end`, `distance_km`, `power_kw`, `lat`, `lon`. `post_code` ist
+immer ein fünfstelliger String (führende Nullen bleiben erhalten), Zeitstempel
+sind ISO 8601 mit Zeitzone, und ein Wert, den die Quelle nicht liefert, ist
+`null`, nie ein leerer String. Manche Antworten führen daneben noch ältere
+Doppelnamen mit identischen Werten (`plz`, `zip`, `strasse`, `hausnummer`, `ort`,
+`city`, `bezeichnung`, `beginn`, `ende`, `art`, `dist_km`, `leistung_kw`,
+`einheit_typ`, dazu die camelCase-Rohfelder der Autobahn-Verkehrsmeldungen).
+Diese Namen sind veraltet, nimm die kanonischen.
+
+> Tipp: Ruf zuerst `/api/v1/cities` auf, um die kanonischen Stadt-Slugs zu
+> finden (etwa `koeln`, `berlin`, `hamburg`), und danach einen stadtbezogenen
+> Endpoint.
+>
+> Der `{slug}` wird tolerant aufgelöst, die exakte ASCII-Form brauchst du also
+> selten: der deutsche Name mit oder ohne Umlaute, jede Groß- und
+> Kleinschreibung, gängige englische Exonyme und Kurzformen führen alle auf den
+> kanonischen Slug (`München`/`münchen`/`munich`/`munchen` → `muenchen`,
+> `cologne` → `koeln`, `frankfurt` → `frankfurt-am-main`). Ein unbekannter Name
+> liefert `404` mit dem Hinweis `Meintest du ...?`, der den nächstliegenden Slug
+> nennt.
 
 [![Run in Postman](https://run.pstmn.io/button.svg)](https://god.gw.postman.com/run-collection/55901679-26601800-bf9d-4ddd-8413-5f273f18be4d)
 
-The full interactive reference and per-city coverage live at
-[infranode.dev](https://infranode.dev). The
-[InfraNode API on the Postman API Network](https://www.postman.com/alster83-7133231/infranode/overview)
-mirrors every endpoint with real example responses, so you can try the
-[InfraNode API Postman collection](https://www.postman.com/alster83-7133231/infranode/collection/pft781f/infranode-api)
-in the browser without an API key.
+Die vollständige interaktive Referenz und die Abdeckung je Stadt stehen auf
+[infranode.dev](https://infranode.dev). Die
+[InfraNode API im Postman API Network](https://www.postman.com/alster83-7133231/infranode/overview)
+spiegelt jeden Endpoint mit echten Beispielantworten, sodass sich die
+[InfraNode API Postman Collection](https://www.postman.com/alster83-7133231/infranode/collection/pft781f/infranode-api)
+ohne API-Key direkt im Browser ausprobieren lässt.
 
-## Data (84 cities, 101 endpoints)
+<!-- Die Endpunktzahl stammt aus docs/openapi.yaml (eine operationId je Operation).
+     Sie muss synchron bleiben: docs-site/scripts/check-endpoint-count.mjs prüft das. -->
+## Daten (84 Städte, 124 Endpunkte)
 
-Every category below is a REST endpoint under `/api/v1/cities/{slug}/<key>`.
-Over MCP the same data comes through 12 lean tools: a few named ones
-(`get_city_overview`, `weather`, `air_quality`, `pois`, `compare`, live boards)
-plus one generic `get_city_resource(slug, resource=<key>)` for every other data
-type (its `resource` enum lists all 67 keys).
+Jede Kategorie unten ist ein REST-Endpoint unter
+`/api/v1/cities/{slug}/<key>`. Über MCP kommen dieselben Daten durch 12 schlanke
+Tools: ein paar benannte (`get_city_overview`, `weather`, `air_quality`, `pois`,
+`compare`, die Live-Tafeln) und ein generisches
+`get_city_resource(slug, resource=<key>)` für jede weitere Datenart (sein
+`resource`-Enum listet alle 81 Keys).
 
-| Group | Data types (endpoint keys) |
-|-------|----------------------------|
-| **Discovery** | `list_cities`, `sources`, `compare` (one resource across many cities), `overview` (one-call catalog + live snapshot) |
-| **Weather & environment** | `weather`, `weather-warnings`, `civil-protection-warnings` (BBK NINA), `air-uba` (official), `air` (live), `pollen-uv`, `water-level`, `flood`, `fire-danger`, `bathing-water` |
-| **Mobility** | `transit`, live stop departures (`transit_departures` tool), `stations` (catalog), station boards by EVA (`station_board_departures`/`station_board_arrivals` tools, incl. local trains + disruptions), `station-departures`, `station-arrivals`, `traffic`, `road-events`, `webcams`, `charging`, `parking` (live occupancy), `sharing`, `fuel-prices`, `bike-counts` |
-| **City & people** | `base`, `geo`, `demographics`, `indicators`, `unemployment`, `tourism`, `construction`, `accidents`, `crime-stats`, `health`, `icu-live`, `holidays`, `election`, `events`, `pois`, playgrounds/markets/toilets and more OSM types |
-| **Economy & real estate** | `land-values`, `tax-rates` (trade/property tax multipliers per municipality), `business-registrations` (founding dynamics per district), `insolvencies` (insolvency filings per district: corporate and other debtors, annual), `public-tenders` (public procurement: running tenders and awarded contracts per city) |
-| **Energy & vehicles** | `power-load`, `power-price`, `energy`, `solar`, `solar-roofs`, `district-heating`, `vehicle-registrations` |
+| Gruppe | Datenarten (Endpoint-Keys) |
+|--------|----------------------------|
+| **Entdecken** | `list_cities`, `sources`, `compare` (eine Datenart über viele Städte), `overview` (Katalog plus Live-Auszug in einem Aufruf) |
+| **Wetter & Umwelt** | `weather`, `weather-warnings`, `civil-protection-warnings` (BBK NINA), `air-uba` (amtlich), `air` (live), `pollen-uv`, `water-level`, `flood`, `fire-danger`, `bathing-water` |
+| **Mobilität** | `transit`, Live-Abfahrten je Haltestelle (Tool `transit_departures`), `stations` (Katalog), Bahnhofstafeln nach EVA (Tools `station_board_departures`/`station_board_arrivals`, inklusive Nahverkehr und Störungen), `station-departures`, `station-arrivals`, `traffic`, `road-events`, `webcams`, `charging`, `parking` (Live-Belegung), `parking-onstreet`, `park-and-ride`, `mobility-points`, `bike-parking`, `sharing`, `fuel-prices`, `bike-counts` |
+| **Stadt & Menschen** | `base`, `geo`, `demographics`, `indicators`, `sustainability` (SDG-Indikatoren je Kommune als Zeitreihe 2006-2023, Wegweiser Kommune / Bertelsmann Stiftung, CC0), `unemployment`, `tourism`, `construction`, `accidents`, `crime-stats`, `health`, `icu-live`, `holidays`, `election`, `events`, `council-papers` (kommunale Ratsinformationen über OParl: Vorlagen, Anträge und Beschlüsse je Stadt), `pois`, Spielplätze, Märkte, Toiletten und weitere OSM-Typen |
+| **Wirtschaft & Immobilien** | `land-values`, `tax-rates` (Hebesätze für Gewerbe- und Grundsteuer je Kommune), `business-registrations` (Gründungsdynamik je Kreis), `insolvencies` (Insolvenzverfahren je Kreis: Unternehmen und übrige Schuldner, jährlich), `public-tenders` (öffentliche Vergabe: laufende Ausschreibungen und vergebene Aufträge je Stadt) |
+| **Energie & Fahrzeuge** | `power-load`, `power-price`, `energy`, `solar`, `solar-roofs`, `district-heating`, `vehicle-registrations` |
 
-## How it behaves
+## Verhalten im Betrieb
 
-- **Keyless & read-only.** No credentials, no writes, no user accounts.
-- **Canonical envelope.** `{ data, meta }` with per-source status and attribution.
-- **Graceful degradation.** A failing upstream returns `source_status`, not an error.
-- **Safe by design.** SSRF and injection gates validate every request; inputs are checked against fixed allowlists.
+- **Ohne Key, nur lesend.** Keine Zugangsdaten, keine Schreibzugriffe, keine Nutzerkonten.
+- **Kanonischer Umschlag.** `{ data, meta }` mit Status und Attribution je Quelle.
+- **Sanfte Degradation.** Eine ausgefallene Quelle liefert `source_status`, keinen Fehler.
+- **Sicher entworfen.** SSRF- und Injection-Gates prüfen jede Anfrage, Eingaben laufen gegen feste Allowlists.
 
-See [SECURITY.md](./SECURITY.md) for the security model.
+Das Sicherheitsmodell steht in [SECURITY.md](./SECURITY.md).
 
-## Use it as an MCP server
+### Paginierung & Kanal-Voreinstellungen
 
-The same API is exposed as a remote MCP server, so AI agents can call all 67
-data types as tools. One line with Claude Code:
+Listen von Datenarten (`charging`, `energy`, `events`, `transit`, die
+OSM-Feature-Endpoints) haben bei gleicher URL eine **kanalabhängige
+Voreinstellung**:
+
+- **Direktes REST** liefert die **vollständige** Liste in einem Aufruf (`limit=null`, `returned == total`, `truncated=false`).
+- **GPT Actions** (OpenAI-Header) und **MCP** sind an eine voreingestellte Seitengröße **gebunden**, damit Antworten für Agenten klein bleiben.
+- **`limit=all`** (oder `?all=1`) erzwingt auf jedem Kanal die volle Liste, `limit` und `offset` blättern explizit.
+- **`meta.pagination`** (`total/returned/limit/offset/truncated`) steht auf jedem Kanal, der ausgelieferte Ausschnitt ist also immer nachvollziehbar.
+
+Bei `traffic` ist die rohe Polyline optional: `include=geometry` (oder `?full=1`)
+ergänzen, die Standardantwort bleibt schlank.
+
+### Stabilität, Changelog & Roadmap
+
+Du baust produktiv auf InfraNode auf? Dann bleib bei Änderungen vorne:
+
+- **[Changelog](https://infranode.dev/changelog/)** listet jede sichtbare Änderung (neue Datenarten, neue Städte, geändertes Verhalten, Fehlerbehebungen, Deprecations), die neueste zuerst. Per [RSS](https://infranode.dev/changelog/feed.xml) abonnierbar.
+- **[Roadmap](https://infranode.dev/roadmap/)** zeigt das Geplante und die Stabilitätszusage: Die API wächst additiv, der Umschlag bleibt stabil, und Änderungen an bestehenden Antworten werden vorher angekündigt (in der Regel 30+ Tage).
+- **[Statusseite](https://status.infranode.dev)** und die GitHub-Releases decken Verfügbarkeit und versionierte Änderungen ab.
+
+## Als MCP-Server nutzen
+
+Dieselbe API steht als Remote-MCP-Server bereit, KI-Agenten können also alle 78
+Datenarten als Tools aufrufen. Mit Claude Code genügt eine Zeile:
 
 ```bash
 claude mcp add --transport http infranode https://mcp.infranode.dev/mcp
 ```
 
-Any other MCP client, point it at the remote endpoint (Streamable HTTP):
+Jeden anderen MCP-Client richtest du auf denselben Remote-Endpoint (Streamable
+HTTP):
 
 ```jsonc
 {
@@ -149,62 +203,63 @@ Any other MCP client, point it at the remote endpoint (Streamable HTTP):
 }
 ```
 
-- **Cursor / Windsurf:** add the block above to `~/.cursor/mcp.json` (or the app's MCP settings).
+- **Cursor / Windsurf:** den Block oben in `~/.cursor/mcp.json` eintragen (oder in die MCP-Einstellungen der App).
 - **VS Code:** `code --add-mcp '{"name":"infranode","url":"https://mcp.infranode.dev/mcp"}'`
-- **Claude Desktop:** add the same `mcpServers` block to your `claude_desktop_config.json`.
-- **ChatGPT:** add a connector with the URL `https://mcp.infranode.dev/mcp`.
+- **Claude Desktop:** denselben `mcpServers`-Block in die `claude_desktop_config.json` eintragen.
+- **ChatGPT:** einen Connector mit der URL `https://mcp.infranode.dev/mcp` anlegen.
 
-All tools are annotated `readOnlyHint: true` / `destructiveHint: false` /
-`idempotentHint: true`, so MCP clients can safely auto-allow them. The MCP layer
-also ships ready-made **prompts** (`city_briefing`, `compare_air_quality`,
-`commute_check`) and **resources** (`infranode://cities`, `infranode://sources`).
-Full install guide, the complete tool manifest with example outputs, the
-permission model and an example transcript are in
-[docs/mcp-install.md](./docs/mcp-install.md). The registry manifest is
+Alle Tools tragen die Annotationen `readOnlyHint: true` /
+`destructiveHint: false` / `idempotentHint: true`, MCP-Clients können sie also
+gefahrlos automatisch freigeben. Die MCP-Schicht bringt außerdem fertige
+**Prompts** (`city_briefing`, `compare_air_quality`, `commute_check`) und
+**Ressourcen** (`infranode://cities`, `infranode://sources`) mit. Die
+vollständige Installationsanleitung, das komplette Tool-Manifest mit
+Beispielausgaben, das Berechtigungsmodell und ein Beispiel-Transkript stehen in
+[docs/mcp-install.md](./docs/mcp-install.md). Das Registry-Manifest ist
 [server.json](./server.json).
 
-## Use it in ChatGPT (Custom GPT action)
+## In ChatGPT nutzen (Custom-GPT-Action)
 
-**Ready-made GPT:** [German City Data (InfraNode)](https://chatgpt.com/g/g-6a48bf065e648191b062bc86256c1897-infranode-live-data-for-german-cities)
-is listed in the GPT Store (Research & Analysis) and works out of the box.
+**Fertiges GPT:** [InfraNode: German City Data - Weather & Transit](https://chatgpt.com/g/g-6a48bf065e648191b062bc86256c1897-infranode-german-city-data-weather-transit)
+steht im GPT Store (Research & Analysis) und funktioniert sofort.
 
-To build your own: InfraNode ships a curated OpenAPI spec for GPT
-actions: 23 of the most useful operations (ChatGPT allows at most 30 per
-action), keyless, all GET.
+Für eine eigene Variante liefert InfraNode eine kuratierte OpenAPI-Spec für
+GPT-Actions: 23 der nützlichsten Operationen (ChatGPT erlaubt höchstens 30 pro
+Action), ohne Key, alle GET.
 
-1. In the [GPT editor](https://chatgpt.com/gpts/editor) open **Configure →
-   Actions → Create new action → Import from URL** and paste
-   `https://infranode.dev/actions/openapi.json`.
-2. Leave authentication at **None**; as privacy policy use
-   `https://infranode.dev/en/privacy/`.
-3. Tell the GPT in its instructions to start with `getCityOverview(slug)`,
-   resolve city names via `getCities`, and cite `data.attribution` (the data
-   licences require attribution).
+1. Im [GPT-Editor](https://chatgpt.com/gpts/editor) **Configure → Actions →
+   Create new action → Import from URL** öffnen und
+   `https://infranode.dev/actions/openapi.json` einfügen.
+2. Die Authentifizierung auf **None** stehen lassen, als Datenschutzerklärung
+   `https://infranode.dev/datenschutz/` eintragen.
+3. In den Instructions des GPT festhalten: mit `getCityOverview(slug)` starten,
+   Stadtnamen über `getCities` auflösen und `data.attribution` zitieren (die
+   Datenlizenzen verlangen die Namensnennung).
 
-Details and recommended instructions:
-[infranode.dev/en/chatgpt/](https://infranode.dev/en/chatgpt/). The spec is
-generated from `docs/openapi.yaml` by `scripts/build_actions_spec.py`.
+Details und empfohlene Instructions:
+[infranode.dev/chatgpt/](https://infranode.dev/chatgpt/). Die Spec wird von
+`scripts/build_actions_spec.py` aus `docs/openapi.yaml` erzeugt.
 
-## Alternatives and how InfraNode compares
+## Alternativen und wie InfraNode dazu steht
 
-Other MCP servers cover parts of the German or European data space. InfraNode is
-the broadest for city-level open data, and the projects below often complement
-each other:
+Andere MCP-Server decken Teile des deutschen oder europäischen Datenraums ab.
+Für Open Data auf Stadtebene ist InfraNode am breitesten, und die Projekte unten
+ergänzen einander oft:
 
-- **[germany-mcp-server](https://github.com/AiAgentKarl/germany-mcp-server)** federal and government data (Autobahn, DWD, NINA, SMARD, Bundestag). Nationwide, no per-city breadth.
-- **[db-mcp-server](https://github.com/PaulvonBerg/db-mcp-server)** / db-timetable-mcp Deutsche Bahn rail timetables only.
-- **[mcp-server-public-transport](https://github.com/mirodn/mcp-server-public-transport)** public transport across Europe; in Germany it covers Berlin/Brandenburg (VBB).
-- **Single-city servers** (e.g. Munich, Berlin) cover one city each.
+- **[germany-mcp-server](https://github.com/AiAgentKarl/germany-mcp-server)** Bundes- und Regierungsdaten (Autobahn, DWD, NINA, SMARD, Bundestag). Bundesweit, ohne Tiefe je Stadt.
+- **[db-mcp-server](https://github.com/PaulvonBerg/db-mcp-server)** / db-timetable-mcp nur Fahrpläne der Deutschen Bahn.
+- **[mcp-server-public-transport](https://github.com/mirodn/mcp-server-public-transport)** ÖPNV in Europa, in Deutschland deckt es Berlin/Brandenburg (VBB) ab.
+- **Server für einzelne Städte** (etwa München, Berlin) decken je eine Stadt ab.
 
-InfraNode covers **84 German cities and 67 data types** behind one keyless, hosted
-endpoint, from environment and mobility to energy, economy and city life. Full
-side-by-side comparison:
-[infranode.dev/en/mcp-comparison](https://infranode.dev/en/mcp-comparison/).
+InfraNode deckt **84 deutsche Städte und 82 Datenarten** hinter einem
+gehosteten Endpoint ohne API-Key ab: Umwelt, Mobilität, Energie, Wirtschaft und
+Stadtleben. Der vollständige Vergleich Seite an Seite steht auf
+[infranode.dev/mcp-vergleich](https://infranode.dev/mcp-vergleich/).
 
-## Self-host (optional)
+## Selbst hosten (optional)
 
-You don't need to, the hosted endpoint above is the fastest path. But the code
-is open. Run the API stack locally with Docker (Compose v2):
+Nötig ist das nicht, der gehostete Endpoint oben ist der schnellste Weg. Der
+Code liegt aber offen. Den API-Stack lokal mit Docker (Compose v2) starten:
 
 ```bash
 cp .env.example .env          # example config, contains NO real secrets
@@ -212,29 +267,31 @@ docker compose -f deploy/docker-compose.yml up
 curl http://localhost/api/v1/health   # -> {"status":"ok","version":"1.0.0","redis":true}
 ```
 
-To run the MCP server itself locally over stdio (against the public API):
+Den MCP-Server selbst lokal über stdio betreiben (gegen die öffentliche API):
 
 ```bash
 uv sync --group mcp
 INFRANODE_MCP_API_BASE=https://infranode.dev/api/v1 uv run python -m infranode.mcp.server
 ```
 
-All settings use the `INFRANODE_` env prefix (see `.env.example`); each data
-source is toggled by its own `INFRANODE_ENABLE_*` flag. Real secrets are never
-committed, only `.env.example` is versioned and CI runs a gitleaks scan.
+Für alle Einstellungen gilt das Env-Präfix `INFRANODE_` (siehe `.env.example`),
+jede Datenquelle hat ihren eigenen `INFRANODE_ENABLE_*`-Schalter. Echte Secrets
+landen nie im Repo, versioniert ist nur `.env.example`, und die CI fährt einen
+gitleaks-Scan.
 
-## License: code and data are separate
+## Lizenz: Code und Daten sind getrennt
 
-- **Code:** Apache-2.0 (see [LICENSE](./LICENSE)).
-- **Data:** the open data served through InfraNode keeps the licenses of its
-  upstream sources (e.g. ODbL for OpenStreetMap, DL-DE-BY for GovData, attribution
-  for DWD). These data licenses and attribution are tracked separately in
-  `DATA-LICENSES.md`. The Apache-2.0 license covers only the API source code, not
-  the passed-through data.
+- **Code:** Apache-2.0 (siehe [LICENSE](./LICENSE)).
+- **Daten:** Die offenen Daten, die InfraNode ausliefert, behalten die Lizenzen
+  ihrer Upstream-Quellen (etwa ODbL für OpenStreetMap, DL-DE-BY für GovData,
+  Namensnennung für DWD). Diese Datenlizenzen und die Attribution werden separat
+  in `DATA-LICENSES.md` geführt. Die Apache-2.0-Lizenz gilt nur für den
+  Quellcode der API, nicht für die durchgereichten Daten.
 
-## Contributing
+## Mitmachen
 
-Contributions are welcome. Setup, gate commands and the secret rule are in
-[CONTRIBUTING.md](./CONTRIBUTING.md). To add a new data source, start with the
-declarative source registry in `src/infranode/registry/source_specs.py` (one
-`SourceSpec` entry per upstream); CONTRIBUTING.md has the full checklist.
+Beiträge sind willkommen. Setup, Gate-Befehle und die Secret-Regel stehen in
+[CONTRIBUTING.md](./CONTRIBUTING.md). Für eine neue Datenquelle ist die
+deklarative Quellen-Registry in `src/infranode/registry/source_specs.py` der
+Startpunkt (ein `SourceSpec`-Eintrag je Upstream), die vollständige Checkliste
+steht in CONTRIBUTING.md.

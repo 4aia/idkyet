@@ -1,106 +1,96 @@
-"""DWD-Wetterwarnungen-Adapter (amtliche Warnungen, GeoNutzV, Tier A).
+"""DWD-Wetterwarnungen-Adapter über Brightsky-Alerts (GeoNutzV, Tier A).
 
-Der DWD liefert die bundesweite WarnApp-JSON (ein Request, alle Warncells). Die
-Route cacht das volle File EINMAL (``fetch_dwd_warnings_all``) und filtert je Stadt
-mit dem reinen ``extract_warncell`` heraus, damit nicht 84-mal dasselbe File
-geladen wird und der Cache nicht den Filter einer anderen Stadt zurückgibt.
+Der DWD hat seine alte bundesweite Warn-JSON-Schnittstelle (JSONP, ein File
+für alle Warncells) am 2026-07-16 global abgeschaltet (404, verifiziert von
+zwei Netzen aus). Die
+Warnungen kommen seitdem über die keylose Brightsky-Alerts-API
+(``https://api.brightsky.dev/alerts``), die dieselben amtlichen DWD-CAP-
+Meldungen ausliefert; Brightsky ist bereits der Bezugsweg der weather-Quelle
+(``adapters/dwd.py``). Abruf je Stadt per lat/lon aus dem Städte-Register
+(die frühere "1"+AGS-Warncell-Ableitung passt für Brightsky nicht, mindestens
+nicht für Stadtstaaten); die zuständige Warncell liefert Brightsky in
+``location.warn_cell_id`` gleich mit.
 
-Die DWD-Gemeinde-Warncell-ID ist ``"1" + achtstelliger AGS`` (z.B. Delmenhorst
-AGS 03401000 -> Warncell 103401000), daher braucht es keine externe Mapping-
-Tabelle; die Route bildet ``warncell_id`` aus dem Register-AGS.
+Mapping je Alert (nur ``status == "actual"``, Test-Meldungen werden verworfen):
+``level`` entsteht aus der CAP-severity (minor=1, moderate=2, severe=3,
+extreme=4; unbekannt/fehlend -> None), ``start``/``end`` sind die amtlichen
+CAP-Zeiten ``onset``/``expires`` und werden als ISO-8601-Strings unverändert
+durchgereicht (früher Epoch-Millisekunden, keine Rückkonvertierung).
 
-Die Antwort ist JSONP (``warnWetter.loadWarnings({...});``); der Wrapper wird vor
-``json.loads`` entfernt. Tageskennzahl: ``max_level`` (0 = keine Warnung, sonst
-1-4 = DWD-Warnstufe), plus ``count`` und die Einzelwarnungen.
+KRITISCH (Audit K5): Hitze-/UV-Gesundheitswarnungen dürfen ``max_level`` nicht
+überstrahlen. Die Erkennung läuft jetzt über das geschlossene Brightsky-Enum
+``category`` (``met`` | ``health``) statt über die frühere Sondercode-Skala
+(Code >= 50): ``max_level`` wird AUSSCHLIESSLICH über ``met``-Warnungen mit
+bekannter Stufe gebildet; ``health``-Warnungen werden NICHT verworfen, sondern
+separat in ``special_warnings`` geführt (Teilmenge von ``warnings``).
 
-KRITISCH (Audit K5): Der DWD mischt im ``level``-Feld zwei Skalen. Reguläre
-Wetterwarnungen tragen Stufe 1-4 (gelb/orange/rot/violett), Hitze-/UV-/Sonder-
-warnungen tragen dagegen Sondercodes ab 50 (z.B. 51 = starke Wärmebelastung).
-Ein naiver ``max()`` über beide Skalen ließe eine Hitzewarnung (51) jede echte
-Sturm-Stufe überstrahlen. Daher wird ``max_level`` AUSSCHLIESSLICH über die
-regulären Stufen 1-4 gebildet; die Sonderwarnungen (Code >= 50) werden NICHT
-verworfen, sondern separat in ``special_warnings`` mit ihrem echten Code geführt.
-
-Sicherheit (T-05-08 SSRF): Host in ``_URL`` hartkodiert; ``warncell_id`` stammt
-aus dem Register-AGS, nicht aus User-Input, und wird nur als dict-Key genutzt.
-``raise_for_status`` ist Pflicht (5xx -> Resilienz-Fassade).
+Sicherheit (T-05-03 SSRF): Host in ``_URL`` hartkodiert; lat/lon stammen aus
+dem validierten Städte-Register (``entry.geo``) und fließen nur als
+Query-Parameter ein. ``raise_for_status`` ist Pflicht (5xx -> Resilienz-
+Fassade, stale-on-error).
 """
 
 from __future__ import annotations
 
-import json
-import re
-
 import httpx
 
-# Host hartkodiert (SSRF-Schutz, T-05-08).
-_URL = "https://www.dwd.de/DWD/warnungen/warnapp/json/warnings.json"
-# JSONP-Wrapper: warnWetter.loadWarnings({...});
-_JSONP = re.compile(r"^[A-Za-z_.]+\((.*)\);?\s*$", re.S)
+# Host hartkodiert (SSRF-Schutz, T-05-03).
+_URL = "https://api.brightsky.dev/alerts"
 
-# Untergrenze der DWD-Sondercodes (Hitze/UV/...). Reguläre Wetter-Warnstufen
-# liegen bei 1-4; Codes >= 50 sind eine eigene Skala und gehören NICHT in
-# max_level (Audit K5).
-_SPECIAL_LEVEL_MIN = 50
+# CAP-severity -> Warnstufe 1-4. Unbekannte/fehlende severity -> None (zählt
+# nicht in max_level, kein Raten; defensive Behandlung).
+_SEVERITY_LEVEL = {"minor": 1, "moderate": 2, "severe": 3, "extreme": 4}
 
 
-def warncell_for_ags(ags: str) -> str:
-    """DWD-Gemeinde-Warncell-ID = '1' + achtstelliger AGS."""
-    return f"1{ags}"
+async def fetch_dwd_warnings(
+    http: httpx.AsyncClient, *, slug: str, lat: float, lon: float
+) -> dict:
+    """Holt aktive amtliche DWD-Warnungen einer Stadt via Brightsky-Alerts.
 
-
-async def fetch_dwd_warnings_all(http: httpx.AsyncClient) -> dict:
-    """Volle bundesweite WarnApp-JSON (JSONP entfernt). Cachebar für alle Städte."""
-    resp = await http.get(_URL)
-    resp.raise_for_status()
-    text = resp.text.strip()
-    match = _JSONP.match(text)
-    return json.loads(match.group(1) if match else text)
-
-
-def extract_warncell(data: dict, warncell_id: str) -> dict:
-    """Reiner Filter: Warnungen einer Warncell aus dem vollen File.
-
-    Rückgabe ``{warncell_id, count, max_level, warnings, special_warnings}``;
-    ``max_level`` 0 wenn keine reguläre Warnung (ehrliche Ruhe-Basislinie, kein
-    None). ``warnings`` enthält ALLE aktiven Warnungen der Zelle (regulär +
-    Sonder); ``special_warnings`` ist die Teilmenge der Sonderwarnungen mit Code
-    >= 50 (Hitze/UV), die NICHT in ``max_level`` einfließen (Audit K5).
+    Rückgabe ``{warncell_id, count, max_level, warnings, special_warnings}``
+    (unverändertes raw-Format für ``map_dwd_warnings``): ``warnings`` enthält
+    ALLE ausgelieferten Warnungen (regulär + health) als dicts mit
+    ``event``/``level``/``headline``/``start``/``end`` (start/end = ISO-8601
+    aus onset/expires); ``special_warnings`` ist die Teilmenge mit
+    ``category == "health"`` (Hitze/UV, Audit K5); ``max_level`` die höchste
+    Stufe der regulären (``met``-)Warnungen, 0 wenn keine (ehrliche
+    Ruhe-Basislinie, nie None). ``warncell_id`` kommt aus
+    ``location.warn_cell_id`` der Antwort (fehlt location -> None) und bleibt
+    NUR im raw-dict (kein Payload-Feld). ``slug`` dient der Symmetrie zum
+    Wetter-Adapter (Cache-Key/Debugging in der Route).
     """
-    cell = (data.get("warnings") or {}).get(str(warncell_id)) or []
-    warnings = [
-        {
-            "event": w.get("event"),
-            "level": w.get("level"),
-            "headline": w.get("headline"),
-            "start": w.get("start"),
-            "end": w.get("end"),
+    resp = await http.get(_URL, params={"lat": lat, "lon": lon})
+    resp.raise_for_status()
+    body = resp.json()
+
+    warnings: list[dict] = []
+    special_warnings: list[dict] = []
+    regular_levels: list[int] = []
+    for alert in body.get("alerts") or []:
+        # Nur amtliche Meldungen ausliefern; status "test" wird verworfen.
+        if alert.get("status") != "actual":
+            continue
+        level = _SEVERITY_LEVEL.get(alert.get("severity"))
+        warning = {
+            "event": alert.get("event_de"),
+            "level": level,
+            "headline": alert.get("headline_de"),
+            "start": alert.get("onset"),
+            "end": alert.get("expires"),
         }
-        for w in cell
-    ]
-    # max_level NUR über die regulären Stufen 1-4 (Sondercodes >= 50 raus).
-    regular_levels = [
-        w.get("level")
-        for w in cell
-        if isinstance(w.get("level"), (int, float))
-        and w.get("level") < _SPECIAL_LEVEL_MIN
-    ]
-    # Sonderwarnungen (Hitze/UV, Code >= 50) separat führen, nicht verwerfen.
-    special_warnings = [
-        w
-        for w in warnings
-        if isinstance(w.get("level"), (int, float)) and w["level"] >= _SPECIAL_LEVEL_MIN
-    ]
+        warnings.append(warning)
+        if alert.get("category") == "health":
+            # Audit K5: Gesundheitswarnungen separat, NICHT in max_level.
+            special_warnings.append(warning)
+        elif level is not None:
+            regular_levels.append(level)
+
+    location = body.get("location") or {}
+    warn_cell = location.get("warn_cell_id")
     return {
-        "warncell_id": str(warncell_id),
-        "count": len(cell),
+        "warncell_id": str(warn_cell) if warn_cell is not None else None,
+        "count": len(warnings),
         "max_level": max(regular_levels) if regular_levels else 0,
         "warnings": warnings,
         "special_warnings": special_warnings,
     }
-
-
-async def fetch_dwd_warnings(http: httpx.AsyncClient, *, warncell_id: str) -> dict:
-    """Convenience: volles File holen und direkt nach Warncell filtern."""
-    data = await fetch_dwd_warnings_all(http)
-    return extract_warncell(data, warncell_id)

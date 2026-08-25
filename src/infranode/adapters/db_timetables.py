@@ -26,16 +26,21 @@ Sicherheit:
 
 Der Adapter ist rein gegenüber Pydantic/Resilienz: er baut KEINEN
 ``CanonicalRecord`` und kennt KEIN Cache/Breaker (Resilienz-Fassade).
-``raise_for_status`` ist Pflicht (5xx -> STALE-ON-ERROR).
+``raise_for_status`` ist Pflicht (5xx -> STALE-ON-ERROR), aber JE EVA: eine
+kaputte EVA wird uebersprungen, der Fehler fliegt erst weiter, wenn ALLE EVAs
+scheitern (siehe ``_fetch_board``, Vorfall 2026-08-24).
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from xml.etree.ElementTree import fromstring  # noqa: S405
+from xml.etree.ElementTree import fromstring
 from zoneinfo import ZoneInfo
 
 import httpx
+import structlog
+
+log = structlog.get_logger()
 
 # Host hartkodiert (SSRF, T-05-08): der DB-API-Marketplace-Gateway.
 _BASE = "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1"
@@ -58,16 +63,22 @@ def _guarded_parse(xml_bytes: bytes):
         return None
     try:
         return fromstring(xml_bytes)  # noqa: S314 - Guard oben, stdlib (Decision 1)
-    except Exception:  # noqa: BLE001 - defektes XML -> no_data statt 500
+    except Exception:
         return None
 
 
 def _parse_dt(value: str | None) -> datetime | None:
-    """Parst die DB-Zeit ``YYMMDDHHmm`` zu einem (naiven) datetime oder None."""
+    """Parst die DB-Zeit ``YYMMDDHHmm`` zu einem zonenbehafteten datetime oder None.
+
+    DB-Timetables liefert Bahnhofszeit (Europe/Berlin) OHNE Zonenangabe. Der
+    Zeitstempel bekommt diese Zone deshalb explizit angeheftet, damit die
+    ausgelieferte ISO-Zeit eindeutig ist ("2026-07-25T10:01:00+02:00") und
+    Clients sie nicht als UTC missdeuten. Vor 2026-07-25 war die Ausgabe naiv.
+    """
     if not value or len(value) != 10 or not value.isdigit():
         return None
     try:
-        return datetime.strptime(value, "%y%m%d%H%M")  # noqa: DTZ007 - relativer Diff
+        return datetime.strptime(value, "%y%m%d%H%M").replace(tzinfo=_TZ)
     except ValueError:
         return None
 
@@ -157,6 +168,14 @@ def _parse_board(
 
         out.append(
             {
+                # Kanonischer Name (Konsistenz-Audit 2026-07-25): die DB-``id``
+                # identifiziert EINEN HALT EINER ZUGFAHRT, nicht eine Haltestelle.
+                # Der frueher einzige Name ``stop_id`` kollidierte mit der
+                # Haltestellen-ID von /live/{city}/transit/departures (DELFI
+                # "de:<AGS>:<id>") und fuehrte dort taeglich zu 400ern, weil
+                # Agenten den Wert von hier weiterreichten. ``stop_id`` bleibt
+                # abgekuendigt mit identischem Wert stehen.
+                "trip_stop_id": sid,
                 "stop_id": sid,
                 "station": station,
                 "line": _line_label(ev, category, number),
@@ -169,7 +188,9 @@ def _parse_board(
                 "delay_minutes": delay_minutes,
                 "cancelled": cancelled,
                 "messages": messages,
-                "_sort": planned or datetime.max,
+                # Sortier-Hilfsfeld: seit planned zonenbehaftet ist, muss auch der
+                # Fallback aware sein (naiv vs. aware waere ein TypeError).
+                "_sort": planned or datetime.max.replace(tzinfo=_TZ),
             }
         )
     return out
@@ -226,7 +247,18 @@ async def _fetch_board(
     Stunde Europe/Berlin) plus die aktuellen Änderungen (/fchg) geholt + gemerged,
     dedupliziert über die Stop-``id``, nach (geplanter) Zeit sortiert, auf
     ``limit`` gekürzt. Rueckgabe: ``{"slug": slug, result_key: [...]}``. Leere Tafel
-    -> leere Liste (-> Route mappt no_data). ``raise_for_status`` Pflicht (Fassade).
+    -> leere Liste (-> Route mappt no_data).
+
+    Fehlertoleranz JE EVA (Vorfall 2026-08-24, 06:59-07:24 UTC: 87 x 503 auf
+    /cities/berlin/station-departures + -arrivals): /fchg/8098160 (Berlin Hbf,
+    tiefe Ebene) lieferte ~25 Minuten lang 502/503, und weil die Schleife den
+    Fehler durchreichte, starb die GESAMTE Stadt-Tafel, obwohl die uebrigen
+    Berliner EVAs sauber antworteten. Ein Bahnhof darf die Tafel der anderen
+    nicht mitnehmen: ein httpx-Fehler EINER EVA wird uebersprungen und geloggt,
+    die Tafel wird aus den gesunden EVAs gebaut. Nur wenn ALLE EVAs scheitern,
+    fliegt der letzte Fehler weiter -> Breaker zaehlt, Route antwortet 503
+    (DX-06 bleibt: toter Upstream ohne Cache = ehrlicher 503). Es wird dabei NIE
+    ein alter Wert ausgeliefert, nur weniger frische Bahnhoefe.
     """
     headers = {
         "DB-Client-Id": client_id,
@@ -235,31 +267,53 @@ async def _fetch_board(
     }
     local = now.astimezone(_TZ)
     by_id: dict[str, dict] = {}
+    last_error: Exception | None = None
+    failed = 0
 
     for eva in evas:
-        changes_bytes = await _get(http, f"{_BASE}/fchg/{eva}", headers)
-        changes_root = _guarded_parse(changes_bytes) if changes_bytes else None
-        changes = (
-            _parse_changes(changes_root, tag=tag) if changes_root is not None else {}
-        )
+        try:
+            changes_bytes = await _get(http, f"{_BASE}/fchg/{eva}", headers)
+            changes_root = _guarded_parse(changes_bytes) if changes_bytes else None
+            changes = (
+                _parse_changes(changes_root, tag=tag)
+                if changes_root is not None
+                else {}
+            )
 
-        for h in range(horizon_hours):
-            slot = local + timedelta(hours=h)
-            url = f"{_BASE}/plan/{eva}/{slot:%y%m%d}/{slot:%H}"
-            plan_bytes = await _get(http, url, headers)
-            root = _guarded_parse(plan_bytes) if plan_bytes else None
-            if root is None:
-                continue
-            for entry in _parse_board(
-                root,
-                changes=changes,
+            for h in range(horizon_hours):
+                slot = local + timedelta(hours=h)
+                url = f"{_BASE}/plan/{eva}/{slot:%y%m%d}/{slot:%H}"
+                plan_bytes = await _get(http, url, headers)
+                root = _guarded_parse(plan_bytes) if plan_bytes else None
+                if root is None:
+                    continue
+                for entry in _parse_board(
+                    root,
+                    changes=changes,
+                    tag=tag,
+                    place_key=place_key,
+                    path_index=path_index,
+                    station=root.get("station"),
+                ):
+                    if entry["stop_id"] and entry["stop_id"] not in by_id:
+                        by_id[entry["stop_id"]] = entry
+        except httpx.HTTPError as exc:
+            # httpx.HTTPError deckt HTTPStatusError (5xx aus _get) UND die
+            # Transportfehler (ReadTimeout/ConnectError) ab. Kein Key im Log
+            # (T-08-CRED), nur EVA + Fehlerklasse.
+            failed += 1
+            last_error = exc
+            log.info(
+                "db_timetables_eva_skipped",
+                slug=slug,
+                eva=eva,
                 tag=tag,
-                place_key=place_key,
-                path_index=path_index,
-                station=root.get("station"),
-            ):
-                if entry["stop_id"] and entry["stop_id"] not in by_id:
-                    by_id[entry["stop_id"]] = entry
+                error=type(exc).__name__,
+            )
+
+    if last_error is not None and failed == len(evas):
+        # Alle Bahnhoefe tot -> ehrlicher Fehler an die Resilienz-Fassade.
+        raise last_error
 
     entries = sorted(by_id.values(), key=lambda d: d["_sort"])[:limit]
     for entry in entries:

@@ -3,8 +3,17 @@
 // Feature-Sektion (kanonischer Envelope, source_status-Semantik, Cache/ETag,
 // MCP, llms.txt). Nutzt das Docs-Layout (Drei-Spalten, Suche im Topbar). Der
 // Content-Slot ist data-pagefind-body, damit die Startseite indexiert wird.
+import { getCollection } from "astro:content";
 import Docs from "../layouts/Docs.astro";
 import JsonLd from "../components/JsonLd.astro";
+import { SITE_STATS } from "../data/site-stats";
+
+// Endpunktzahl aus der einzigen Quelle (docs/openapi.yaml via endpoints-
+// Collection) zur Build-Zeit berechnen, damit sie nicht mehr hartcodiert an
+// mehreren Stellen auseinanderdriftet. Ein Drift-Check (scripts/
+// check-endpoint-count.mjs) schlägt an, falls jemand wieder eine feste Zahl
+// einträgt.
+const endpointCount = (await getCollection("endpoints")).length;
 
 // FAQ für die Landing (GEO): konversationelle Dev-Fragen plus FAQPage-JSON-LD.
 // Single Source: eine Liste speist sowohl die sichtbare Sektion als auch das
@@ -49,7 +58,7 @@ const faqJsonLd = JSON.stringify({
 ---
 
 <Docs
-  title="84 Städte. 67 Datenarten. Eine API. Kostenlos."
+  title={`${SITE_STATS.cities} Städte. ${SITE_STATS.dataTypes} Datenarten. Eine API. Kostenlos.`}
   description="Kostenlose, keylose Open-Data-API und MCP-Server für 84 deutsche Großstädte: Wetter, Luftqualität, ÖPNV-Echtzeit, Strompreis und mehr. Ohne API-Schlüssel, kommerziell nutzbar."
   current="home"
   lang="de"
@@ -83,18 +92,18 @@ const faqJsonLd = JSON.stringify({
       über einen konsistenten JSON-Envelope ab, ohne API-Schlüssel.
     </p>
     <ul>
-      <li>84 Großstädte, 67 Datenarten, 102 Endpunkte, ein einheitlicher Envelope.</li>
+      <li>{SITE_STATS.cities} Großstädte, {SITE_STATS.dataTypes} Datenarten, {endpointCount} Endpunkte, ein einheitlicher Envelope.</li>
       <li>Kein Schlüssel nötig, kostenlos und ohne Werbung.</li>
-      <li>Betrieb auf einem Server in Deutschland, mit ehrlichem Quellen-Status.</li>
+      <li>Betrieb auf Servern in Deutschland und Finnland (EU), mit ehrlichem Quellen-Status.</li>
     </ul>
   </div>
 
   <ul class="stats">
-    <li class="stat"><a href="/staedte/"><strong>84</strong> Großstädte</a></li>
-    <li class="stat"><strong>67</strong> Datenarten</li>
-    <li class="stat"><strong>102</strong> Endpunkte</li>
-    <li class="stat"><strong>4.300+</strong> Datenströme, steigend</li>
-    <li class="stat"><strong>35+</strong> amtliche Quellen</li>
+    <li class="stat"><a href="/staedte/"><strong>{SITE_STATS.cities}</strong> Großstädte</a></li>
+    <li class="stat"><strong>{SITE_STATS.dataTypes}</strong> Datenarten</li>
+    <li class="stat"><strong>{endpointCount}</strong> Endpunkte</li>
+    <li class="stat"><strong>{SITE_STATS.dataStreams.de}</strong> Datenströme, steigend</li>
+    <li class="stat"><strong>{SITE_STATS.sources.de}</strong> Datenquellen</li>
   </ul>
 
   <div class="hero__actions">
@@ -146,7 +155,7 @@ const faqJsonLd = JSON.stringify({
 
   <h2>Welche Daten gibt es</h2>
   <p>
-    67 Datenarten je Stadt, alle permissiv lizenziert (Tier A: DL-DE/BY,
+    {SITE_STATS.dataTypes} Datenarten je Stadt, alle permissiv lizenziert (Tier A: DL-DE/BY,
     CC-BY, kommerziell nutzbar):
   </p>
   <ul>
@@ -163,11 +172,16 @@ const faqJsonLd = JSON.stringify({
     <li>
       <strong>Energie und Statistik:</strong> Energieanlagen
       (Marktstammdatenregister), Stromverbrauch und Börsenstrompreis (SMARD),
-      Arbeitslosenquote, Tourismus-Übernachtungen, Baugenehmigungen, Demografie.
+      Arbeitslosenquote, Tourismus-Übernachtungen, Baugenehmigungen, Demografie,
+      Nachhaltigkeits- und SDG-Indikatoren als Zeitreihe seit 2006.
+      Dazu neun weitere Zeitreihen-Datenarten aus dem Wegweiser Kommune:
+      Altersaufbau und Bevölkerungsentwicklung mit Prognose bis 2040,
+      kommunale Finanzen, Arbeitsmarkt und Pendler, Integration,
+      Kinderbetreuung, Bildungsstatistik, soziale Lage und Pflege.
     </li>
     <li>
       <strong>Wasser, Gesundheit, Stadtleben:</strong> Pegelstände und
-      Hochwasser, Krankenhäuser und Intensivbetten, POIs, Veranstaltungen,
+      Hochwasser, Krankenhäuser, POIs, Veranstaltungen,
       Wahlergebnisse, Feiertage, Verwaltungsgrenzen.
     </li>
   </ul>
@@ -238,10 +252,11 @@ const faqJsonLd = JSON.stringify({
     <li class="feature">
       <h3>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-        Betrieb in Deutschland
+        Betrieb in der EU
       </h3>
       <p>
-        InfraNode läuft auf einem Server in Deutschland, ohne Werbung, ohne
+        InfraNode läuft auf Servern in Deutschland und Finnland
+        (Ausfallsicherung), ohne Werbung, ohne
         Tracking und ohne Cookies. Eine öffentliche
         <a href="/abdeckung/">Status-Seite</a> zeigt die Verfügbarkeit je
         Datenbereich; die <code>/abdeckung</code>-Seite nennt ehrlich, welcher

@@ -1,4 +1,4 @@
-"""Köln-Radzählstellen-Adapter ``fetch_koeln_radzaehl`` (DATA-40, Tier A).
+"""Köln-Radzählstellen-Adapter ``fetch_koeln_bike_counts`` (DATA-40, Tier A).
 
 Liefert je Kölner Radzählstelle den Jahres-Summenwert 2022 keylos aus der offenen
 CSV des städtischen Open-Data-Portals (DL-DE/Zero 2.0, Stadt Köln,
@@ -49,7 +49,7 @@ def _to_int(cell: str) -> int | None:
         return None
 
 
-async def fetch_koeln_radzaehl(
+async def fetch_koeln_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,

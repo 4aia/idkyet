@@ -25,6 +25,22 @@ _DL_DE_ZERO_URL = "https://www.govdata.de/dl-de/zero-2-0"
 # Fallback nur, falls eine (ältere) raw-Quelle keine license_url mitführt;
 # neue Quellen setzen sie stets explizit (Berlin Zero, BW/HE/HH DL-DE/BY).
 
+# Roh-WFS-Feldname -> kanonischer englischer Item-Key (Abkündigung 2026-08-01).
+# Der Backfill liegt bewusst im Mapper (nicht im Adapter), damit auch gecachte/
+# persistierte Roh-Features die kanonischen Keys erhalten; die rohen Keys
+# (inkl. der Hessen-camelCase-Keys) bleiben als abgekündigte Duplikate mit
+# identischem Wert stehen (Muster koeln_arcgis). "info" und "link" sind bereits
+# englisch und bleiben ohne Duplikat.
+_CANONICAL_KEYS: dict[str, str] = {
+    "typ": "type",
+    "bezeichnung": "name",
+    "bautyp": "building_type",
+    "baujahr": "build_year",
+    "siteName": "site_name",
+    "siteDesignation": "site_designation",
+    "publicationSource": "publication_source",
+}
+
 
 def map_heritage(
     raw: dict,
@@ -49,6 +65,11 @@ def map_heritage(
         for field in fields:
             value = props.get(field)
             if value is not None:
+                # Kanonischer englischer Key zuerst, der rohe Quell-Key bleibt
+                # als abgekündigtes Duplikat (identischer Wert) stehen.
+                canonical = _CANONICAL_KEYS.get(field)
+                if canonical is not None:
+                    item[canonical] = value
                 item[field] = value
         items.append(item)
 
@@ -65,7 +86,7 @@ def map_heritage(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.DENKMAL,
+        source=SourceId.HERITAGE,
         license_id=LicenseId(raw["license_id"]),
         license_tier=LicenseTier(raw["license_tier"]),
         ags=ags,

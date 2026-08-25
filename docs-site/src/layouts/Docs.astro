@@ -7,9 +7,8 @@ import { getCollection } from "astro:content";
 import Search from "../components/Search.astro";
 import SeoHead from "../components/SeoHead.astro";
 import PageActions from "../components/PageActions.astro";
-import { topics } from "../data/topics";
-import { mcpTopics } from "../data/mcp-topics";
 import { CATEGORIES, CATEGORY_OF } from "../data/endpoint-categories";
+import { NAV_LABEL, NAV_HIDDEN, NAV_LIVE } from "../data/endpoint-labels";
 import "../styles/global.css";
 
 interface Props {
@@ -49,12 +48,15 @@ const NON_ENDPOINT = new Set([
   "coverage",
   "mcp",
   "chatgpt",
-  "ueber",
+  "gpts",
+  "über",
   "impressum",
   "datenschutz",
   "tutorials",
   "tutorial",
   "daten",
+  "changelog",
+  "roadmap",
 ]);
 // Per-Datentyp- ("daten-<id>") und per-City-Landingpages ("stadt-<slug>") sind
 // keine Endpunkt-Seiten und tragen keine Page-Actions (kein .md-Pendant).
@@ -70,35 +72,92 @@ const actionPrompt = isEndpointPage
     : `Hier ist die InfraNode-API-Doku für ${title} im Markdown-Format. Hilf mir, diesen Endpunkt zu nutzen. Doku-URL:`
   : "";
 
-// Nav-Einträge aus der endpoints-Collection (Single Source openapi.yaml),
-// nach tag gruppiert und je Gruppe nach id sortiert. Aufgeteilt in zwei
-// sichtbare Menü-Gruppen: reguläre Stadt-Endpunkte vs. Live-Endpunkte
-// (Pfad-Segment ``/live/``; ``icu-live`` bleibt regulär).
-type NavEndpoint = { id: string; method: string; summary: string };
-// Zwei Sektionen (Live-Tag -> "Live Endpunkte", sonst "Endpunkte"); innerhalb
-// jeder Sektion nach thematischer Kategorie (endpoint-categories) gruppiert.
+// API-Referenz: EIN Baum für alle Endpunkte (Stadt + Live) je Themenkategorie.
+// Live-Operationen (OpenAPI-Tag "Live") tragen ein LIVE-Badge statt einer
+// eigenen Sektion. Als Link-Text dient das kurze kuratierte Label
+// (endpoint-labels, Fallback summary); operationId + volle summary stehen im
+// title-Attribut. Deprecation-Aliasse (NAV_HIDDEN) erscheinen nicht in der
+// Sidebar, ihre Seiten existieren weiter.
+type NavEndpoint = { id: string; method: string; label: string; title: string; live: boolean };
 const endpoints = await getCollection("endpoints");
-const cityByCat = new Map<string, NavEndpoint[]>();
-const liveByCat = new Map<string, NavEndpoint[]>();
+const byCat = new Map<string, NavEndpoint[]>();
 for (const entry of endpoints) {
-  const byCat = entry.data.tag === "Live" ? liveByCat : cityByCat;
+  if (NAV_HIDDEN.has(entry.data.id)) continue;
   const cat = CATEGORY_OF[entry.data.id] ?? "sonstige";
   if (!byCat.has(cat)) byCat.set(cat, []);
+  const summary = (isEn ? entry.data.summaryEn : entry.data.summary) || entry.data.id;
   byCat.get(cat)!.push({
     id: entry.data.id,
     method: entry.data.method,
-    summary: entry.data.summary,
+    label: NAV_LABEL[entry.data.id]?.[isEn ? "en" : "de"] ?? summary,
+    title: `${entry.data.id}: ${summary}`,
+    // LIVE-Badge = Echtzeitdaten: /live/-Routen (Tag) plus kuratierte
+    // Stadt-Endpunkte mit Echtzeit-Charakter (NAV_LIVE, z.B. Spritpreise).
+    live: entry.data.tag === "Live" || NAV_LIVE.has(entry.data.id),
   });
 }
-for (const m of [cityByCat, liveByCat]) {
-  for (const list of m.values()) list.sort((a, b) => a.id.localeCompare(b.id));
+for (const list of byCat.values()) {
+  list.sort((a, b) => a.label.localeCompare(b.label, lang));
 }
-const sectionTotal = (m: Map<string, NavEndpoint[]>) =>
-  [...m.values()].reduce((n, l) => n + l.length, 0);
-const endpointSections = [
-  { title: isEn ? "Endpoints" : "Endpunkte", byCat: cityByCat, total: sectionTotal(cityByCat) },
-  { title: isEn ? "Live endpoints" : "Live Endpunkte", byCat: liveByCat, total: sectionTotal(liveByCat) },
+const refTotal = [...byCat.values()].reduce((n, l) => n + l.length, 0);
+const refActive = [...byCat.values()].some((l) => l.some((ep) => ep.id === current));
+
+// Sidebar-Gruppen (aufgabenorientiert): Loslegen, Grundlagen, [API-Referenz],
+// KI & Integrationen, Projekt. DE und EN kommen aus EINER Struktur, damit die
+// Sprachfassungen nicht auseinanderlaufen. keys = current-Werte der Zielseiten
+// (DE/EN), prefix markiert zugehörige Unterseiten (z.B. daten-<topic>).
+type NavItem = {
+  de: string;
+  en: string;
+  deHref: string;
+  enHref: string;
+  keys: string[];
+  prefix?: string;
+  cta?: boolean;
+};
+type NavGroup = { de: string; en: string; items: NavItem[] };
+const NAV_PRE: NavGroup[] = [
+  {
+    de: "Loslegen",
+    en: "Get started",
+    items: [
+      { de: "Quick-Start", en: "Quickstart", deHref: "/quickstart/", enHref: "/en/quickstart/", keys: ["quickstart"], cta: true },
+      { de: "Tutorials", en: "Tutorials", deHref: "/tutorials/", enHref: "/en/tutorials/", keys: ["tutorials", "tutorial"] },
+    ],
+  },
+  {
+    de: "Grundlagen",
+    en: "Basics",
+    items: [
+      { de: "Datenarten", en: "Data types", deHref: "/daten/", enHref: "/en/data/", keys: ["daten"], prefix: "daten-" },
+      { de: "Paginierung & Limits", en: "Pagination & limits", deHref: "/pagination/", enHref: "/en/pagination/", keys: ["pagination"] },
+      { de: "Städte", en: "Cities", deHref: "/staedte/", enHref: "/en/cities/", keys: ["staedte", "cities"], prefix: "stadt-" },
+      { de: "Abdeckung & Status", en: "Coverage & status", deHref: "/abdeckung/", enHref: "/en/coverage/", keys: ["abdeckung", "coverage"] },
+    ],
+  },
 ];
+const NAV_POST: NavGroup[] = [
+  {
+    de: "KI & Integrationen",
+    en: "AI & integrations",
+    items: [
+      { de: "MCP-Server", en: "MCP server", deHref: "/mcp/", enHref: "/en/mcp/", keys: ["mcp"], prefix: "mcp-" },
+      { de: "ChatGPT & GPTs", en: "ChatGPT & GPTs", deHref: "/chatgpt/", enHref: "/en/chatgpt/", keys: ["chatgpt", "gpts"] },
+    ],
+  },
+  {
+    de: "Projekt",
+    en: "Project",
+    items: [
+      { de: "Changelog", en: "Changelog", deHref: "/changelog/", enHref: "/en/changelog/", keys: ["changelog"] },
+      { de: "Roadmap", en: "Roadmap", deHref: "/roadmap/", enHref: "/en/roadmap/", keys: ["roadmap"] },
+      { de: "Über", en: "About", deHref: "/ueber/", enHref: "/en/about/", keys: ["über"] },
+    ],
+  },
+];
+const itemActive = (item: NavItem) =>
+  item.keys.includes(current) || (item.prefix ? current.startsWith(item.prefix) : false);
+const groupActive = (group: NavGroup) => group.items.some(itemActive);
 ---
 
 <!doctype html>
@@ -123,6 +182,19 @@ const endpointSections = [
         <span class="topbar__wordmark">InfraNode<span class="topbar__wordmark-tld">.dev</span></span>
       </a>
       <Search lang={lang} />
+      <button
+        class="topbar__menu"
+        data-nav-toggle
+        hidden
+        aria-expanded="false"
+        aria-controls="docs-nav"
+        aria-label={isEn ? "Open menu" : "Menü öffnen"}
+      >
+        <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path class="topbar__menu-open" d="M3 5h14M3 10h14M3 15h14" />
+          <path class="topbar__menu-close" d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </button>
       <nav class="langswitch" aria-label={isEn ? "Language" : "Sprache"}>
         <a
           class="langswitch__link"
@@ -157,221 +229,78 @@ const endpointSections = [
     }
 
     <div class="layout">
-      <nav class="nav" aria-label={isEn ? "Documentation navigation" : "Doku-Navigation"}>
+      <nav class="nav" id="docs-nav" aria-label={isEn ? "Documentation navigation" : "Doku-Navigation"}>
         <details class="nav__disclosure" open>
           <summary class="nav__toggle">{isEn ? "Menu" : "Menü"}</summary>
           <div class="nav__inner">
         {
-          isEn ? (
-            <div class="nav__group">
-              <p class="nav__title">Start</p>
+          NAV_PRE.map((group) => (
+            <details class="nav__grp" open data-active={groupActive(group) ? "" : undefined}>
+              <summary class="nav__grp-title"><span class="nav__grp-label">{isEn ? group.en : group.de}</span></summary>
               <ul class="nav__list">
-                <li>
-                  <a class="nav__link" href="/en/" aria-current={current === "home" ? "page" : undefined}>
-                    Home
-                  </a>
-                </li>
-                <li>
-                  <a
-                    class="nav__link nav__link--cta"
-                    href="/en/quickstart/"
-                    aria-current={current === "quickstart" ? "page" : undefined}
-                  >
-                    Quickstart
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/cities/" aria-current={current === "cities" ? "page" : undefined}>
-                    Cities
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/data/" aria-current={current === "daten" ? "page" : undefined}>
-                    Data API
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/coverage/" aria-current={current === "abdeckung" ? "page" : undefined}>
-                    Coverage & status
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/mcp/" aria-current={current === "mcp" ? "page" : undefined}>
-                    MCP server
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/chatgpt/" aria-current={current === "chatgpt" ? "page" : undefined}>
-                    ChatGPT &amp; GPT Actions
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/tutorials/" aria-current={current === "tutorials" || current === "tutorial" ? "page" : undefined}>
-                    Tutorials
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/en/about/" aria-current={current === "ueber" ? "page" : undefined}>
-                    About
-                  </a>
-                </li>
+                {group.items.map((item) => (
+                  <li>
+                    <a
+                      class={item.cta ? "nav__link nav__link--cta" : "nav__link"}
+                      href={isEn ? item.enHref : item.deHref}
+                      aria-current={itemActive(item) ? "page" : undefined}
+                    >
+                      {isEn ? item.en : item.de}
+                    </a>
+                  </li>
+                ))}
               </ul>
-              <details class="nav__cat" open={current?.startsWith("daten-")}>
-                <summary class="nav__cat-title">Data by topic</summary>
-                <ul class="nav__list">
-                  {topics.map((topic) => (
-                    <li>
-                      <a
-                        class="nav__link"
-                        href={`/en/data/${topic.en.slug}/`}
-                        aria-current={current === `daten-${topic.id}` ? "page" : undefined}
-                      >
-                        {topic.en.h1}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <details class="nav__cat" open={current?.startsWith("mcp-")}>
-                <summary class="nav__cat-title">MCP by topic</summary>
-                <ul class="nav__list">
-                  {mcpTopics.map((topic) => (
-                    <li>
-                      <a
-                        class="nav__link"
-                        href={`/en/mcp/${topic.en.slug}/`}
-                        aria-current={current === `mcp-${topic.id}` ? "page" : undefined}
-                      >
-                        {topic.en.h1}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          ) : (
-            <div class="nav__group">
-              <p class="nav__title">Start</p>
-              <ul class="nav__list">
-                <li>
-                  <a class="nav__link" href="/" aria-current={current === "home" ? "page" : undefined}>
-                    Startseite
-                  </a>
-                </li>
-                <li>
-                  <a
-                    class="nav__link nav__link--cta"
-                    href="/quickstart/"
-                    aria-current={current === "quickstart" ? "page" : undefined}
-                  >
-                    Quick-Start
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/staedte/" aria-current={current === "staedte" ? "page" : undefined}>
-                    Städte
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/daten/" aria-current={current === "daten" ? "page" : undefined}>
-                    Daten-API
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/abdeckung/" aria-current={current === "abdeckung" ? "page" : undefined}>
-                    Abdeckung & Status
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/mcp/" aria-current={current === "mcp" ? "page" : undefined}>
-                    MCP-Server
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/chatgpt/" aria-current={current === "chatgpt" ? "page" : undefined}>
-                    ChatGPT &amp; GPT Actions
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/tutorials/" aria-current={current === "tutorials" || current === "tutorial" ? "page" : undefined}>
-                    Tutorials
-                  </a>
-                </li>
-                <li>
-                  <a class="nav__link" href="/ueber/" aria-current={current === "ueber" ? "page" : undefined}>
-                    Über
-                  </a>
-                </li>
-              </ul>
-              <details class="nav__cat" open={current?.startsWith("daten-")}>
-                <summary class="nav__cat-title">Daten nach Thema</summary>
-                <ul class="nav__list">
-                  {topics.map((topic) => (
-                    <li>
-                      <a
-                        class="nav__link"
-                        href={`/daten/${topic.de.slug}/`}
-                        aria-current={current === `daten-${topic.id}` ? "page" : undefined}
-                      >
-                        {topic.de.h1}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <details class="nav__cat" open={current?.startsWith("mcp-")}>
-                <summary class="nav__cat-title">MCP nach Thema</summary>
-                <ul class="nav__list">
-                  {mcpTopics.map((topic) => (
-                    <li>
-                      <a
-                        class="nav__link"
-                        href={`/mcp/${topic.de.slug}/`}
-                        aria-current={current === `mcp-${topic.id}` ? "page" : undefined}
-                      >
-                        {topic.de.h1}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          )
+            </details>
+          ))
         }
+        <details class="nav__grp nav__grp--ref" open data-active={refActive ? "" : undefined}>
+          <summary class="nav__grp-title">
+            <span class="nav__grp-label">{isEn ? "API reference" : "API-Referenz"}</span>
+            <span class="nav__cat-count">{refTotal}</span>
+          </summary>
+          {
+            CATEGORIES.filter((cat) => byCat.has(cat.id)).map((cat) => (
+              <details class="nav__cat" open={byCat.get(cat.id)!.some((ep) => ep.id === current)}>
+                <summary class="nav__cat-title">
+                  {isEn ? cat.en : cat.de}
+                  <span class="nav__cat-count">{byCat.get(cat.id)!.length}</span>
+                </summary>
+                <ul class="nav__list">
+                  {byCat.get(cat.id)!.map((ep) => (
+                    <li>
+                      <a
+                        class="nav__link nav__link--ep"
+                        href={isEn ? `/en/api/${ep.id}/` : `/api/${ep.id}/`}
+                        aria-current={current === ep.id ? "page" : undefined}
+                        title={ep.title}
+                      >
+                        <span class="nav__ep-label">{ep.label}</span>
+                        {ep.live && <span class="nav__live">LIVE</span>}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ))
+          }
+        </details>
         {
-          endpointSections.map((sect, i) => (
-            <details
-              class="nav__sect"
-              open={i === 0 || [...sect.byCat.values()].some((l) => l.some((ep) => ep.id === current))}
-            >
-              <summary class="nav__sect-title">
-                {sect.title}
-                <span class="nav__cat-count">{sect.total}</span>
-              </summary>
-              {CATEGORIES.filter((cat) => sect.byCat.has(cat.id)).map((cat) => (
-                <details
-                  class="nav__cat nav__group--sub"
-                  open={sect.byCat.get(cat.id)!.some((ep) => ep.id === current)}
-                >
-                  <summary class="nav__cat-title">
-                    {isEn ? cat.en : cat.de}
-                    <span class="nav__cat-count">{sect.byCat.get(cat.id)!.length}</span>
-                  </summary>
-                  <ul class="nav__list">
-                    {sect.byCat.get(cat.id)!.map((ep) => (
-                      <li>
-                        <a
-                          class="nav__link"
-                          href={isEn ? `/en/api/${ep.id}/` : `/api/${ep.id}/`}
-                          aria-current={current === ep.id ? "page" : undefined}
-                        >
-                          {ep.id}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ))}
+          NAV_POST.map((group) => (
+            <details class="nav__grp" open data-active={groupActive(group) ? "" : undefined}>
+              <summary class="nav__grp-title"><span class="nav__grp-label">{isEn ? group.en : group.de}</span></summary>
+              <ul class="nav__list">
+                {group.items.map((item) => (
+                  <li>
+                    <a
+                      class={item.cta ? "nav__link nav__link--cta" : "nav__link"}
+                      href={isEn ? item.enHref : item.deHref}
+                      aria-current={itemActive(item) ? "page" : undefined}
+                    >
+                      {isEn ? item.en : item.de}
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </details>
           ))
         }
@@ -403,6 +332,8 @@ const endpointSections = [
               <a class="footer__link" href="/en/cities/">Cities</a>
               <a class="footer__link" href="/en/mcp/">MCP server</a>
               <a class="footer__link" href="/en/mcp-comparison/">MCP comparison</a>
+              <a class="footer__link" href="/en/changelog/">Changelog</a>
+              <a class="footer__link" href="/en/roadmap/">Roadmap</a>
               <a class="footer__link" href="/en/about/">About</a>
               <a class="footer__link" href="/en/imprint/">Imprint</a>
               <a class="footer__link" href="/en/privacy/">Privacy</a>
@@ -413,6 +344,8 @@ const endpointSections = [
               <a class="footer__link" href="/staedte/">Städte</a>
               <a class="footer__link" href="/mcp/">MCP-Server</a>
               <a class="footer__link" href="/mcp-vergleich/">MCP-Vergleich</a>
+              <a class="footer__link" href="/changelog/">Changelog</a>
+              <a class="footer__link" href="/roadmap/">Roadmap</a>
               <a class="footer__link" href="/ueber/">Über</a>
               <a class="footer__link" href="/impressum/">Impressum</a>
               <a class="footer__link" href="/datenschutz/">Datenschutz</a>
@@ -422,8 +355,8 @@ const endpointSections = [
         <p class="footer__meta">
           {
             isEn
-              ? "Free, no ads, accessible. Operated on a server in Germany. Source code on GitHub (Apache-2.0)."
-              : "Kostenlos, ohne Werbung, barrierefrei. Betrieb auf einem Server in Deutschland. Quellcode öffentlich auf GitHub (Apache-2.0)."
+              ? "Free, no ads, accessible. Operated on servers in Germany and Finland (EU). Source code on GitHub (Apache-2.0)."
+              : "Kostenlos, ohne Werbung, barrierefrei. Betrieb auf Servern in Deutschland und Finnland (EU). Quellcode öffentlich auf GitHub (Apache-2.0)."
           }
         </p>
       </div>
@@ -451,15 +384,42 @@ const endpointSections = [
         }
       }
 
-      // Mobiles Navigationsmenü: auf schmalen Viewports die Funktionsliste
-      // standardmäßig einklappen, damit der Inhalt zuerst sichtbar ist. Auf
-      // Desktop bleibt sie offen. Ohne JS bleibt details[open] = kein Regress.
+      // Mobiles Navigationsmenü: mit JS wird das <details> zum Overlay-Drawer,
+      // geöffnet über den Hamburger in der Topbar. Die Nav-Gruppen starten im
+      // Drawer geschlossen, nur die Gruppe der aktuellen Seite ist offen. Auf
+      // Desktop bleibt alles offen. Ohne JS bleibt das Inline-<details> mit
+      // sichtbarem "Menü"-Toggle erhalten (html.js steuert die CSS-Umschaltung).
+      document.documentElement.classList.add("js");
       const navDisclosure = document.querySelector<HTMLDetailsElement>(".nav__disclosure");
-      if (navDisclosure) {
+      const navToggle = document.querySelector<HTMLButtonElement>("[data-nav-toggle]");
+      const topbar = document.querySelector<HTMLElement>(".topbar");
+      const navGroups = document.querySelectorAll<HTMLDetailsElement>(".nav__grp");
+      if (navDisclosure && navToggle && topbar) {
         const navMq = window.matchMedia("(max-width: 1080px)");
-        const applyNavState = () => {
-          navDisclosure.open = !navMq.matches;
+        const setTopbarHeight = () => {
+          document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`);
         };
+        const syncToggle = () => {
+          navToggle.setAttribute("aria-expanded", String(navDisclosure.open));
+          // Drawer offen -> Seite dahinter nicht scrollen (nur mobil relevant).
+          document.body.classList.toggle("nav-open", navMq.matches && navDisclosure.open);
+        };
+        const applyNavState = () => {
+          setTopbarHeight();
+          navDisclosure.open = !navMq.matches;
+          // Mobil: Gruppen geschlossen, aktive Gruppe offen. Desktop: alle offen.
+          for (const grp of navGroups) {
+            grp.open = navMq.matches ? grp.hasAttribute("data-active") : true;
+          }
+          syncToggle();
+        };
+        navToggle.hidden = false;
+        navToggle.addEventListener("click", () => {
+          navDisclosure.open = !navDisclosure.open;
+          syncToggle();
+        });
+        navDisclosure.addEventListener("toggle", syncToggle);
+        window.addEventListener("resize", setTopbarHeight);
         applyNavState();
         navMq.addEventListener("change", applyNavState);
       }

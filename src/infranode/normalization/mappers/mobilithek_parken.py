@@ -7,7 +7,7 @@ deterministisch in einen ``CanonicalRecord``:
   SourceId.DORTMUND_PARKING (LIVE-09, schließt die DATA-09-Belegungslücke Parken).
 - ``map_kiel_counts``: Kiel MIV-/Radzaehlstellen (MeasuredDataPublication,
   ``measurements``) -> ``CountStationPayload`` (``counts``),
-  SourceId.KIEL_ZAEHLSTELLEN (LIVE-10).
+  SourceId.KIEL_COUNTING_STATIONS (LIVE-10).
 
 Schablone ist ``mappers/mobilithek_koeln.py`` (exakt, Plan 04): rein (kein HTTP,
 kein XML-Parse, keine Systemuhr), ``retrieved_at`` keyword-only injiziert
@@ -53,6 +53,17 @@ _KIEL_ATTRIBUTION = "Landeshauptstadt Kiel"
 # Daten-Eigner. Geforderte Quellenangabe verbatim (Veränderungshinweis bei
 # Änderung; hier modified=False wie die Schwester-Parken-Mapper). Recherche 2026-06-30.
 _MAGDEBURG_ATTRIBUTION = "Datenquelle: Landeshauptstadt Magdeburg, www.magdeburg.de"
+# P+R Hessen (ivm GmbH, Mobilithek DATEX II): das Angebot ist als
+# LICENSE_FREE_USE_OPEN_DATA gelistet; der maßgebliche Daten-Eigner (ivm im Auftrag
+# des Landes Hessen / regionaler Verkehrsverbund) stellt die Daten unter Datenlizenz
+# Deutschland Namensnennung 2.0 (DL-DE/BY 2.0, Tier A) bereit, geforderte
+# Quellenangabe verbatim "ivm GmbH" (25-01 source_specs/DATA-LICENSES).
+_PR_HESSEN_ATTRIBUTION = "ivm GmbH"
+# Köln-Parken (Mobilithek, DATEX II V2): Köln stellt seine Mobilithek-
+# Verkehrsdaten durchgängig unter DL-DE/Zero 2.0 bereit (Bestand
+# koeln_traffic_flow etc., Verifikation 2026-06-26 in DATA-LICENSES.md);
+# Attribution informativ (unter Zero nicht verpflichtend).
+_KOELN_ATTRIBUTION = "Stadt Köln"
 
 
 def _parse_as_of(raw: dict) -> datetime | None:
@@ -227,6 +238,86 @@ def map_magdeburg_parking(
     )
 
 
+def map_koeln_parking(
+    raw: dict,
+    *,
+    retrieved_at: datetime,
+    ags: str | None = None,
+    wikidata_qid: str | None = None,
+) -> CanonicalRecord:
+    """Bildet die Köln-Parkdaten (parking) auf einen ``CanonicalRecord`` ab.
+
+    Die ``facilities`` (je Parkplatz facility_id + free/capacity/occupied/
+    occupancy/status/opening_status/observed_at aus dem dynamischen Feed,
+    angereichert um name/lat/lon aus dem statischen Pendant; DATEX II V2
+    ParkingStatusPublication-Light-Profil, gejoint in ``fetch_koeln_parking``
+    im Adapter ``mobilithek_datex2``) wandern in den ``ParkingPayload``.
+    ``observed_at`` aus der DATEX-II ``publicationTime`` (``as_of``) des
+    dynamischen Feeds falls vorhanden. ``retrieved_at`` injiziert (keine Systemuhr
+    im Mapper).
+
+    Lizenz: Köln stellt seine Mobilithek-Verkehrsdaten durchgängig unter
+    DL-DE/Zero 2.0 bereit (Bestand koeln_traffic_flow etc., Verifikation
+    2026-06-26 in DATA-LICENSES.md; Portal-Label "freie Nutzung/Open Data"
+    konsistent) -> ``license_id=DL_DE_ZERO_2_0``, ``license_tier=A``,
+    Attribution "Stadt Köln" (informativ, unter Zero nicht verpflichtend).
+    """
+    return CanonicalRecord(
+        city_slug=raw["slug"],
+        geo=None,
+        observed_at=_parse_as_of(raw),
+        retrieved_at=retrieved_at,
+        source=SourceId.KOELN_PARKING,
+        license_id=LicenseId.DL_DE_ZERO_2_0,
+        license_tier=LicenseTier.A,
+        ags=ags,
+        wikidata_qid=wikidata_qid,
+        attribution=Attribution(
+            text=_KOELN_ATTRIBUTION,
+            license_url=_DL_DE_ZERO_URL,
+        ),
+        payload=ParkingPayload(
+            facilities=raw.get("facilities", []),
+        ),
+    )
+
+
+def map_pr_hessen_parking(
+    raw: dict,
+    *,
+    retrieved_at: datetime,
+    ags: str | None = None,
+    wikidata_qid: str | None = None,
+) -> CanonicalRecord:
+    """Bildet die P+R-Hessen-Parkdaten (parking) auf einen ``CanonicalRecord`` ab.
+
+    Die ``facilities`` (je Park-and-Ride-Anlage facility_id + free/total/occupancy/
+    status/observed_at aus dem Mobilithek-DATEX-II-Feed der ivm GmbH,
+    ``lot_type="P+R"``) wandern in den ``ParkingPayload``. ``observed_at`` aus der
+    DATEX-II ``publicationTime`` (``as_of``) falls vorhanden. ``retrieved_at``
+    injiziert (keine Systemuhr im Mapper). Tier A, DL-DE/BY 2.0, Attribution
+    "ivm GmbH". Erweitert die Parken-Abdeckung um das Rhein-Main-P+R-Netz.
+    """
+    return CanonicalRecord(
+        city_slug=raw["slug"],
+        geo=None,
+        observed_at=_parse_as_of(raw),
+        retrieved_at=retrieved_at,
+        source=SourceId.PR_HESSEN_PARKING,
+        license_id=LicenseId.DL_DE_BY_2_0,
+        license_tier=LicenseTier.A,
+        ags=ags,
+        wikidata_qid=wikidata_qid,
+        attribution=Attribution(
+            text=_PR_HESSEN_ATTRIBUTION,
+            license_url=_DL_DE_BY_URL,
+        ),
+        payload=ParkingPayload(
+            facilities=raw.get("facilities", []),
+        ),
+    )
+
+
 def map_kiel_counts(
     raw: dict,
     *,
@@ -247,7 +338,7 @@ def map_kiel_counts(
         geo=None,
         observed_at=_parse_as_of(raw),
         retrieved_at=retrieved_at,
-        source=SourceId.KIEL_ZAEHLSTELLEN,
+        source=SourceId.KIEL_COUNTING_STATIONS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

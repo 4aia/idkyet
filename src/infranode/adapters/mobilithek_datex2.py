@@ -36,7 +36,7 @@ und gibt ein ehrliches leeres Ergebnis zurück, wenn der Guard/Size-Cap greift.
 from __future__ import annotations
 
 import io
-from xml.etree.ElementTree import iterparse  # noqa: S405
+from xml.etree.ElementTree import iterparse
 
 from infranode.adapters.autobahn import _within_bbox
 from infranode.infra.mobilithek import build_pull_url, pull_subscription
@@ -49,21 +49,39 @@ _MAX_BYTES = 64 * 1024 * 1024  # 64 MiB
 # ohnehin per _localname, daher robust gegen NS-Detail-Drift.
 _NS = "{http://datex2.eu/schema/2/2_0}"
 
-# Parking-Status-Element (LIVE-09, RESEARCH Open Question 2): die dynamische
-# Dortmund-Belegung steht in einer ``ParkingStatusPublication``; je Parkhaus ein
-# ``parkingStatus``-Container mit der Parkhaus-Referenz
-# (``parkingRecordReference``/``parkingRecordStatus``, ID-Attribut) und den
-# Belegungswerten (``parkingNumberOfVacantSpaces`` = freie Plätze,
-# ``parkingNumberOfSpacesOverride`` = Kapazität, ``parkingOccupancy`` = Auslastung
-# in Prozent). ANNAHME (nicht am realen Feed verifiziert, kein Server-Zugriff): das
-# exakte Publication-Element des Dortmund-Abos ist anhand der DATEX-II-V2-Spec +
-# RESEARCH angenommen. Falls der reale Abo-Feed andere lokale Tag-Namen nutzt,
-# genügt es, diese Konstanten anzupassen (der Parse ist NS-robust per _localname).
-_PARKING_STATUS_TAG = "parkingStatus"
-_PARKING_REF_TAGS = ("parkingRecordReference", "parkingRecordStatus")
+# Parking-Status-Elemente (ParkingStatusPublication-Light-Profil): AM REALEN
+# KÖLN-FEED VERIFIZIERT (Live-Pull 2026-07-23, Abo 1015702468436041728, 41
+# Anlagen, quick-260723-gaq). Struktur: genericPublicationExtension >
+# parkingStatusPublication > je Anlage ein ``parkingRecordStatus`` (xsi:type
+# ParkingSiteStatus) mit ``parkingRecordReference`` (ID-Attribut, Join-Key,
+# z.B. "PH19"), ``parkingStatusOriginTime`` (observed_at) und einem
+# ``parkingOccupancy``-CONTAINER, der ``parkingNumberOfSpacesOverride``
+# (Kapazität), ``parkingNumberOfVacantSpaces`` (frei),
+# ``parkingNumberOfOccupiedSpaces`` (belegt) und ein GLEICHNAMIGES
+# Blatt-Element ``parkingOccupancy`` (Auslastung, BEREITS PROZENT: verifiziert
+# 117/300 = 39.0) trägt. GOTCHA: äußeres und inneres Element heißen beide
+# ``parkingOccupancy``; der Container hat keinen Text und fällt im Parse durch
+# den Leer-Text-Skip, nur das Blatt (mit Text) wird gelesen. Dazu
+# ``parkingSiteStatus`` (z.B. spacesAvailable) und ``parkingSiteOpeningStatus``
+# (z.B. open). Der Parse ist NS-robust per _localname.
+_PARKING_STATUS_TAG = "parkingRecordStatus"
+_PARKING_REF_TAGS = ("parkingRecordReference",)
 _PARKING_VACANT_TAG = "parkingNumberOfVacantSpaces"
 _PARKING_CAPACITY_TAG = "parkingNumberOfSpacesOverride"
+_PARKING_OCCUPIED_TAG = "parkingNumberOfOccupiedSpaces"
 _PARKING_OCCUPANCY_TAG = "parkingOccupancy"
+_PARKING_ORIGIN_TIME_TAG = "parkingStatusOriginTime"
+_PARKING_SITE_STATUS_TAG = "parkingSiteStatus"
+_PARKING_OPENING_STATUS_TAG = "parkingSiteOpeningStatus"
+# Statisches Pendant (parkingTablePublication, Abo 1015702561260216320): je
+# Anlage ein ``parkingRecord`` (id-Attribut = Join-Key, xsi:type
+# UrbanParkingSite) mit ``parkingName`` > values > value (Name),
+# ``parkingNumberOfSpaces`` (Kapazität) und ``parkingLocation`` >
+# pointByCoordinates > pointCoordinates (latitude/longitude).
+_PARKING_RECORD_TAG = "parkingRecord"
+_PARKING_NAME_TAG = "parkingName"
+_PARKING_STATIC_CAPACITY_TAG = "parkingNumberOfSpaces"
+_PARKING_LOCATION_TAG = "parkingLocation"
 
 
 def _localname(tag: str) -> str:
@@ -107,6 +125,7 @@ def parse_datex2_situations(
     lat: float,
     lon: float,
     radius_km: float = 30.0,
+    keep_uncoordinated: bool = False,
 ) -> dict:
     """Parst eine DATEX-II-V2-``SituationPublication`` und filtert auf die BBox.
 
@@ -115,6 +134,16 @@ def parse_datex2_situations(
     (``lat``, ``lon``) passieren den ``_within_bbox``-Filter (Baustellen/
     Ereignisse, LIVE-07). Reiner, synchroner Parse (testbar ohne Netz).
 
+    ``keep_uncoordinated`` (Default False): im LEZ-Modus (Köln Umweltzone,
+    verifiziert 2026-07-08) tragen die situationRecords ein leeres
+    groupOfLocations (Point ohne pointCoordinates), sodass der BBox-Filter JEDEN
+    Record verwerfen wuerde, obwohl es echte LEZ-Daten sind (trafficElementExtension
+    eventName/subType "LEZ"). Ist ``keep_uncoordinated`` True, wird KEIN BBox-Filter
+    angewandt (jeder situationRecord passiert) und je Record zusaetzlich
+    ``event_name`` + ``sub_type`` aus der trafficElementExtension NS-robust
+    uebernommen. Der Default False haelt alle bestehenden Situation-Endpunkte
+    (berlin/hannover/koeln ereignisse/baustellen) unveraendert.
+
     Haertung: ``_guard`` (Pre-Parse-Guard + Size-Cap) läuft VOR ``iterparse``.
     Rueckgabe: ``{"slug": slug, "events": [...]}`` (leere Publication -> ``[]``).
     """
@@ -122,30 +151,65 @@ def parse_datex2_situations(
 
     events: list[dict] = []
     bio = io.BytesIO(xml_bytes)
-    # noqa S314: stdlib-Parse bewusst (Decision 1, stdlib-only). XXE/DoS-Mitigation
+
     # ist der Pre-Parse-Guard + Size-Cap oben (untrusted Live-Feed).
     for _event, elem in iterparse(bio):  # noqa: S314
         if _localname(elem.tag) != "situationRecord":
             continue
         coords = _extract_point(elem)
+        elat: float | None = None
+        elon: float | None = None
+        include = False
         if coords is not None:
             elat, elon = coords
-            if _within_bbox(elat, elon, lat, lon, radius_km):
-                events.append(
-                    {
-                        "id": elem.get("id"),
-                        "type": elem.get(
-                            "{http://www.w3.org/2001/XMLSchema-instance}type"
-                        ),
-                        "comment": _first_comment(elem),
-                        "latitude": elat,
-                        "longitude": elon,
-                    }
-                )
+            # Im keep_uncoordinated-Modus kein BBox-Filter (jeder Record passiert),
+            # sonst der bestehende BBox-Filter.
+            include = keep_uncoordinated or _within_bbox(
+                elat, elon, lat, lon, radius_km
+            )
+        elif keep_uncoordinated:
+            include = True
+        if include:
+            event: dict = {
+                "id": elem.get("id"),
+                "type": elem.get("{http://www.w3.org/2001/XMLSchema-instance}type"),
+                "comment": _first_comment(elem),
+                "latitude": elat,
+                "longitude": elon,
+            }
+            if keep_uncoordinated:
+                event_name, sub_type = _extract_traffic_element_ext(elem)
+                if event_name is not None:
+                    event["event_name"] = event_name
+                if sub_type is not None:
+                    event["sub_type"] = sub_type
+            events.append(event)
         # Memory-konstant: das geparste Element sofort freigeben.
         elem.clear()
 
     return {"slug": slug, "events": events}
+
+
+def _extract_traffic_element_ext(record) -> tuple[str | None, str | None]:
+    """Liest ``eventName`` + ``subType`` aus der ``trafficElementExtension``.
+
+    Köln-LEZ-Records modellieren den fachlichen Inhalt (Bezirk + "LEZ") in einer
+    ``trafficElementExtension`` statt in Standard-DATEX-II-Feldern. Beide Werte sind
+    optional; ein fehlendes Feld liefert ``None`` (kein Fehler).
+    """
+    event_name: str | None = None
+    sub_type: str | None = None
+    for node in record.iter():
+        local = _localname(node.tag)
+        if local == "eventName" and event_name is None:
+            text = (node.text or "").strip()
+            if text:
+                event_name = text
+        elif local == "subType" and sub_type is None:
+            text = (node.text or "").strip()
+            if text:
+                sub_type = text
+    return event_name, sub_type
 
 
 def parse_datex2_measured(
@@ -174,7 +238,7 @@ def parse_datex2_measured(
 
     measurements: list[dict] = []
     bio = io.BytesIO(xml_bytes)
-    # noqa S314: siehe parse_datex2_situations (stdlib-only + Pre-Parse-Guard).
+
     for _event, elem in iterparse(bio):  # noqa: S314
         if _localname(elem.tag) != "siteMeasurements":
             continue
@@ -195,24 +259,25 @@ def parse_datex2_parking(
     lon: float | None = None,
     radius_km: float = 30.0,
 ) -> dict:
-    """Parst eine DATEX-II-V2-``ParkingStatusPublication`` (Parkhaus-Belegung, LIVE-09).
+    """Parst eine DATEX-II-V2-``ParkingStatusPublication`` (Parkhaus-Belegung).
 
-    STATUS (Audit 2026-06-29, Finding 184): dieser Parse-Zweig ist derzeit an KEINE
-    Live-Route verdrahtet - kein Endpunkt ruft ``fetch_datex2(publication="parking")``
-    auf. Die aktive Dortmund-Parken-Quelle ist der KEYLOSE Opendatasoft-Feed
-    (``adapters/dortmund_parking.fetch_dortmund_parking``), nicht Mobilithek-DATEX-II.
-    Die Tag-Konstanten (``_PARKING_*``) bleiben gegen die DATEX-II-V2-Spec ANGENOMMEN
-    (am realen Abo-Feed nie verifiziert, kein Server-Zugriff). Der Zweig ist
-    fixture-getestet und bleibt einsatzbereit für ein künftiges echtes
-    Mobilithek-Parking-Abo; vor Inbetriebnahme die Konstanten am realen Feed prüfen.
+    STATUS: seit quick-260723-gaq die aktive Köln-Parken-Quelle
+    (``fetch_koeln_parking``); die Tag-Konstanten (``_PARKING_*``) sind AM
+    REALEN KÖLN-FEED VERIFIZIERT (Live-Pull 2026-07-23, 41 Anlagen,
+    nationalIdentifier DE-MDM-Koeln). Historie: als Reserve für ein
+    Dortmund-Mobilithek-Abo gebaut (LIVE-09), nie an Dortmund verdrahtet
+    (Dortmund läuft über den keylosen Opendatasoft-Feed).
 
-    Additiver Parse-Zweig zum V2-Parser: je ``parkingStatus`` (siehe
+    Parse-Zweig zum V2-Parser: je ``parkingRecordStatus`` (siehe
     ``_PARKING_STATUS_TAG``) die Parkhaus-Referenz (``facility_id`` aus dem
     ``id``-Attribut der ``parkingRecordReference``) und die dynamische Belegung
-    (``free`` = freie Plätze, ``capacity`` = Kapazität, ``occupancy`` =
-    Auslastung in Prozent). Der dynamische Feed trägt im Status-Element keine
-    Koordinaten (Geo aus dem statischen Pendant ist Folge-Detail, analog
-    ``parse_datex2_measured``); daher KEIN BBox-Filter - ``lat``/``lon`` bleiben
+    (``free`` = freie Plätze, ``capacity`` = Kapazität, ``occupied`` = belegt,
+    ``occupancy`` = Auslastung BEREITS in Prozent - NICHT normalisieren,
+    verifiziert 117/300 = 39.0) plus ``status`` (parkingSiteStatus),
+    ``opening_status`` (parkingSiteOpeningStatus) und ``observed_at``
+    (parkingStatusOriginTime). Der dynamische Feed trägt im Status-Element
+    keine Koordinaten (Geo kommt aus dem statischen Pendant, Join in
+    ``fetch_koeln_parking``); daher KEIN BBox-Filter - ``lat``/``lon`` bleiben
     Schnittstellen-konform optional. Reiner, synchroner Parse (testbar ohne Netz).
 
     Haertung: IDENTISCH zu den V2-Parsern - ``_guard`` (Pre-Parse-Guard +
@@ -226,7 +291,7 @@ def parse_datex2_parking(
 
     facilities: list[dict] = []
     bio = io.BytesIO(xml_bytes)
-    # noqa S314: siehe parse_datex2_situations (stdlib-only + Pre-Parse-Guard).
+
     for _event, elem in iterparse(bio):  # noqa: S314
         if _localname(elem.tag) != _PARKING_STATUS_TAG:
             continue
@@ -349,20 +414,31 @@ def _extract_measurement(site) -> dict | None:
 
 
 def _extract_parking_facility(status) -> dict | None:
-    """Liest facility_id + Belegungswerte aus einem ``parkingStatus``-Element.
+    """Liest facility_id + Belegungswerte aus einem ``parkingRecordStatus``-Element.
 
     ``facility_id`` aus dem ``id``-Attribut der Parkhaus-Referenz
     (``_PARKING_REF_TAGS``). Belegungswerte NS-robust per ``_localname``:
     ``free`` (``_PARKING_VACANT_TAG``, int), ``capacity``
-    (``_PARKING_CAPACITY_TAG``, int), ``occupancy`` (``_PARKING_OCCUPANCY_TAG``,
-    float). Felder optional (nicht jedes Parkhaus trägt alle Werte). Gibt
-    ``None`` zurück, wenn das Element komplett leer ist (Datenfehler fällt aus,
-    statt 500). Ein einzelner unparsebarer Wert verwirft nur diesen Wert.
+    (``_PARKING_CAPACITY_TAG``, int), ``occupied`` (``_PARKING_OCCUPIED_TAG``,
+    int), ``occupancy`` (``_PARKING_OCCUPANCY_TAG``, float, BEREITS Prozent -
+    NICHT normalisieren; Köln live-verifiziert 2026-07-23: 117/300 = 39.0).
+    GOTCHA: das äußere ``parkingOccupancy`` ist ein CONTAINER ohne Text und
+    fällt durch den Leer-Text-Skip; nur das gleichnamige Blatt (mit Text) wird
+    gelesen. Dazu ``status`` (parkingSiteStatus), ``opening_status``
+    (parkingSiteOpeningStatus) und ``observed_at`` (parkingStatusOriginTime).
+    Felder optional (nicht jedes Parkhaus trägt alle Werte). Gibt ``None``
+    zurück, wenn das Element komplett leer ist (Datenfehler fällt aus, statt
+    500). Ein einzelner unparsebarer Wert verwirft nur diesen Wert. Negative
+    Zählwerte (Sentinel-Praxis, vgl. Magdeburg) fallen ehrlich auf ``None``.
     """
     facility_id: str | None = None
     free: int | None = None
     capacity: int | None = None
+    occupied: int | None = None
     occupancy: float | None = None
+    site_status: str | None = None
+    opening_status: str | None = None
+    observed_at: str | None = None
 
     for node in status.iter():
         local = _localname(node.tag)
@@ -377,8 +453,16 @@ def _extract_parking_facility(status) -> dict | None:
                 free = int(float(text))
             elif local == _PARKING_CAPACITY_TAG:
                 capacity = int(float(text))
+            elif local == _PARKING_OCCUPIED_TAG:
+                occupied = int(float(text))
             elif local == _PARKING_OCCUPANCY_TAG:
                 occupancy = float(text)
+            elif local == _PARKING_SITE_STATUS_TAG and site_status is None:
+                site_status = text
+            elif local == _PARKING_OPENING_STATUS_TAG and opening_status is None:
+                opening_status = text
+            elif local == _PARKING_ORIGIN_TIME_TAG and observed_at is None:
+                observed_at = text
         except ValueError:
             # Einzelner Datenfehler verwirft nur diesen Wert, nicht das Parkhaus.
             continue
@@ -387,12 +471,20 @@ def _extract_parking_facility(status) -> dict | None:
         return None
 
     entry: dict = {"facility_id": facility_id}
-    if free is not None:
+    if free is not None and free >= 0:
         entry["free"] = free
-    if capacity is not None:
+    if capacity is not None and capacity >= 0:
         entry["capacity"] = capacity
-    if occupancy is not None:
+    if occupied is not None and occupied >= 0:
+        entry["occupied"] = occupied
+    if occupancy is not None and occupancy >= 0:
         entry["occupancy"] = occupancy
+    if site_status is not None:
+        entry["status"] = site_status
+    if opening_status is not None:
+        entry["opening_status"] = opening_status
+    if observed_at is not None:
+        entry["observed_at"] = observed_at
     return entry
 
 
@@ -422,6 +514,7 @@ async def fetch_datex2(
     lon: float,
     publication: str,
     radius_km: float = 30.0,
+    keep_uncoordinated: bool = False,
 ) -> dict:
     """Pullt ein Mobilithek-Abo und parst es je Publication-Typ (LIVE-05/06/07).
 
@@ -429,7 +522,8 @@ async def fetch_datex2(
     (``build_pull_url``, Host hartkodiert -> SSRF-Invariante), pullt über den
     mTLS-Client (``pull_subscription``) und verzweigt nach ``publication``:
     ``"situation"`` -> ``parse_datex2_situations``, ``"measured"`` ->
-    ``parse_datex2_measured``.
+    ``parse_datex2_measured``. ``keep_uncoordinated`` (nur situation) reicht den
+    LEZ-Modus durch (koordinatenlose Records ohne BBox-Filter, Köln Umweltzone).
 
     HTTP 422 (Abo aktiv, kein Datenpaket) liefert ``status="no_data"`` -> ein
     ehrliches leeres Ergebnis (kein ``raise``, T-20-422). Ein vom Pre-Parse-Guard
@@ -460,7 +554,12 @@ async def fetch_datex2(
     try:
         if publication == "situation":
             parsed = parse_datex2_situations(
-                body, slug=slug, lat=lat, lon=lon, radius_km=radius_km
+                body,
+                slug=slug,
+                lat=lat,
+                lon=lon,
+                radius_km=radius_km,
+                keep_uncoordinated=keep_uncoordinated,
             )
         elif publication == "parking":
             parsed = parse_datex2_parking(
@@ -484,7 +583,7 @@ async def fetch_datex2(
 # ---------------------------------------------------------------------------
 # DATEX-II-V2 ParkingFacility-Profil (Wuppertal, statisch + dynamisch gejoint).
 #
-# Eigenes V2-Profil, getrennt vom Köln-/Dortmund-``parkingStatus``-Pfad
+# Eigenes V2-Profil, getrennt vom Köln-``parkingRecordStatus``-Pfad
 # (parse_datex2_parking): Wuppertal liefert eine
 # ``parkingFacilityTableStatusPublication`` (dynamisch) bzw. eine
 # ``parkingFacilityTablePublication`` (statisch). GOTCHA (verifiziert
@@ -801,6 +900,34 @@ async def fetch_wuppertal_parking(
     )
 
 
+async def fetch_pr_hessen_parking(
+    mtls_client,
+    *,
+    abo_id: str,
+    static_abo_id: str | None,
+    slug: str,
+) -> dict:
+    """Pullt P+R-Hessen-Parkdaten (ivm GmbH, Mobilithek DATEX II V2 ParkingFacility).
+
+    Rhein-Main-Park-and-Ride-Netz aus dem Mobilithek-Abo (dyn 986579619578552320 /
+    stat 986574757105147904). Delegiert an den gemeinsamen V2-ParkingFacility-Kern
+    (wie Wuppertal/Magdeburg): ``abo_id`` NUR aus der Settings-Allowlist (SSRF,
+    T-25-16), Host hartkodiert, 422 -> no_data (Graceful Degradation).
+
+    ``occupancy_is_percent`` folgt dem Wuppertal-Default (Anteil 0..1). Das reale
+    DATEX-Profil des ivm-Angebots ist bei Abo-Freigabe gegen den Live-Pull zu
+    verifizieren (Checkpoint 25-05); bis dahin bleibt ``enable_pr_hessen_parking``
+    False und die Route liefert disabled.
+    """
+    return await _fetch_facility_parking_v2(
+        mtls_client,
+        abo_id=abo_id,
+        static_abo_id=static_abo_id,
+        slug=slug,
+        occupancy_is_percent=False,
+    )
+
+
 async def fetch_magdeburg_parking(
     mtls_client,
     *,
@@ -822,3 +949,134 @@ async def fetch_magdeburg_parking(
         slug=slug,
         occupancy_is_percent=True,
     )
+
+
+def parse_koeln_parking_static(xml_bytes: bytes, *, slug: str) -> dict:
+    """Parst die statische Köln-``parkingTablePublication`` (Stammdaten).
+
+    Am realen Feed verifiziert (Live-Pull 2026-07-23, Abo 1015702561260216320):
+    je Anlage ein ``parkingRecord`` (``id``-Attribut = Join-Key, xsi:type
+    UrbanParkingSite) mit ``parkingName`` > values > value (Name, z.B.
+    "Am Guerzenich"), ``parkingNumberOfSpaces`` (Kapazität) und
+    ``parkingLocation`` > pointByCoordinates > pointCoordinates
+    (latitude/longitude). Gibt ``{"slug", "sites": {facility_id: {...}}}`` für
+    den Join zurück (analog ``parse_facility_static_v2``). Haertung: ``_guard``
+    vor ``iterparse``.
+    """
+    _guard(xml_bytes)
+
+    sites: dict[str, dict] = {}
+    bio = io.BytesIO(xml_bytes)
+    for _event, elem in iterparse(bio):  # noqa: S314
+        if _localname(elem.tag) != _PARKING_RECORD_TAG:
+            continue
+        site = _extract_parking_record_static(elem)
+        if site is not None and site.get("facility_id"):
+            sites[site["facility_id"]] = site
+        elem.clear()
+
+    return {"slug": slug, "sites": sites}
+
+
+def _extract_parking_record_static(record) -> dict | None:
+    """Liest facility_id + Stammdaten aus einem statischen ``parkingRecord``.
+
+    ``facility_id`` aus dem ``id``-Attribut. ``name`` aus dem ersten ``value``
+    unter ``parkingName`` (gezielt, NICHT der erste ``value`` im Record).
+    ``capacity`` aus ``parkingNumberOfSpaces``. ``lat``/``lon`` gezielt aus
+    ``parkingLocation`` (pointByCoordinates > pointCoordinates).
+    """
+    facility_id = record.get("id")
+
+    name = None
+    name_elem = _find_local(record, _PARKING_NAME_TAG)
+    if name_elem is not None:
+        name = _first_text_local(name_elem, _VALUE_TAG)
+
+    capacity: int | None = None
+    cap_text = _first_text_local(record, _PARKING_STATIC_CAPACITY_TAG)
+    if cap_text is not None:
+        try:
+            capacity = int(float(cap_text))
+        except ValueError:
+            capacity = None
+
+    lat: float | None = None
+    lon: float | None = None
+    loc = _find_local(record, _PARKING_LOCATION_TAG)
+    if loc is not None:
+        lat_text = _first_text_local(loc, _LAT_TAG)
+        lon_text = _first_text_local(loc, _LON_TAG)
+        try:
+            if lat_text is not None and lon_text is not None:
+                lat = float(lat_text)
+                lon = float(lon_text)
+        except ValueError:
+            lat = lon = None
+
+    if facility_id is None and name is None and capacity is None:
+        return None
+
+    site: dict = {"facility_id": facility_id}
+    if name is not None:
+        site["name"] = name
+    if capacity is not None:
+        site["capacity"] = capacity
+    if lat is not None and lon is not None:
+        site["lat"] = lat
+        site["lon"] = lon
+    return site
+
+
+async def fetch_koeln_parking(
+    mtls_client,
+    *,
+    abo_id: str,
+    static_abo_id: str | None,
+    slug: str,
+) -> dict:
+    """Pullt Köln-Parkdaten (Stadt Köln via Mobilithek, DATEX II V2).
+
+    ``nationalIdentifier`` DE-MDM-Koeln, live-verifiziert 2026-07-23: beide Abos
+    (dyn 1015702468436041728 / stat 1015702561260216320) 200 OK per path-Pull,
+    41 Anlagen. Köln nutzt NICHT das ParkingFacility-Profil von Wuppertal/
+    Magdeburg, sondern das ParkingStatusPublication-Light-Profil
+    (``parkingRecordStatus``, verschachtelter ``parkingOccupancy``-Container):
+    dynamisch parst ``parse_datex2_parking``, statisch
+    ``parse_koeln_parking_static``, gejoint über die parkingRecord-ID (z.B.
+    "PH19", dynamisch führend, statisch reichert name/lat/lon/capacity an).
+    ``parkingOccupancy`` trägt BEREITS Prozent (verifiziert 117/300 = 39.0),
+    keine Normalisierung. ``abo_id`` NUR aus der Settings-Allowlist (SSRF,
+    T-25-16), Host hartkodiert. HTTP 422 / vom Guard abgelehnter Body ->
+    ehrliches leeres Ergebnis (no_data). Ersetzt den bei ParkenDD eingefrorenen
+    Köln-Feed (upstream last_updated 2021-09, quick-260723-gaq). Live-Daten,
+    kein Archiv-Write.
+    """
+    dyn_url = build_pull_url(abo_id)  # style="path" (Default, verifiziert)
+    dyn_result = await pull_subscription(mtls_client, dyn_url)
+    if dyn_result["status"] == "no_data" or dyn_result["body"] is None:
+        return {"slug": slug, "facilities": [], "as_of": None}
+
+    try:
+        status = parse_datex2_parking(dyn_result["body"], slug=slug)
+    except ValueError:
+        return {"slug": slug, "facilities": [], "as_of": None}
+    # publicationTime als as_of (Guard lief in parse_datex2_parking bereits).
+    as_of = _extract_publication_time(dyn_result["body"])
+
+    static = {"slug": slug, "sites": {}}
+    if static_abo_id:
+        try:
+            stat_result = await pull_subscription(
+                mtls_client, build_pull_url(static_abo_id)
+            )
+            if stat_result["status"] == "ok" and stat_result["body"] is not None:
+                static = parse_koeln_parking_static(stat_result["body"], slug=slug)
+        except ValueError:
+            static = {"slug": slug, "sites": {}}
+
+    return {
+        "slug": slug,
+        "facilities": _join_facilities(status, static),
+        "as_of": as_of,
+    }

@@ -50,6 +50,8 @@ from datetime import UTC, datetime
 
 import httpx
 
+from infranode.normalization.fields import clean_text
+
 # [VERIFIED 2026-06-10] Layer 0 "Standort" (Punkt) + Layer 2 "Bereich" (Fläche)
 # tragen das Baustellen-Schema; Layer 1 "Strecke" ist ein Verkehrslage-Layer
 # (auslastung/tendenz, keine Datumsfelder) und bleibt bewusst außen vor.
@@ -68,6 +70,30 @@ _FIELD_BEZEICHNUNG = "name"  # [VERIFIED 2026-06-10] Titel/Strasse der Maßnahme
 _FIELD_ART = "typ"  # [VERIFIED 2026-06-10] Integer-Code, als String durchgereicht
 _FIELD_BEGINN = "datum_von"  # [VERIFIED 2026-06-10] Epoch-ms -> ISO-8601
 _FIELD_ENDE = "datum_bis"  # [VERIFIED 2026-06-10] Epoch-ms -> ISO-8601
+
+# Klartext zum ``typ``-Code. Quelle ist die codierte Werteliste des Dienstes
+# selbst (Layer 0, Domain "WS2_Standorttyp", abgefragt ueber
+# ``MapServer/0?f=json``, [VERIFIED 2026-07-25]) - nicht geraten. Layer 2
+# ("Bereich") liefert KEINE Domain mit, dort bleibt das Label bewusst leer,
+# statt die Codes von Layer 0 zu unterstellen.
+_LAYER_WITH_DOMAIN = 0
+_ART_LABELS: dict[str, str] = {
+    "1": "Aktuelle Verkehrsnachricht: Achtung",
+    "2": "Baustelle, Verbot der Einfahrt",
+    "3": "Baustelle",
+    "4": "Kinder, Schulanfang",
+    "5": "Stau",
+    "6": "Glätte",
+    "7": "Hochwasser",
+    "8": "Veranstaltung in der LANXESS arena",
+    "9": "Veranstaltung im RheinEnergieStadion",
+    "10": "Messeveranstaltung",
+    "11": "Veranstaltung im RheinEnergieStadion: Fußball",
+    "12": "Laufveranstaltung",
+    "13": "Karneval",
+    "14": "Event",
+    "15": "Weihnachtsmarkt",
+}
 
 
 def _epoch_ms_to_iso(value: object) -> str | None:
@@ -130,9 +156,12 @@ async def fetch_koeln_road_events(
     mit ``f=json``, ``returnGeometry=true``, ``outSR=4326`` (Service-CRS ist UTM)
     und ``resultRecordCount=1000`` (DoS-Cap je Layer) ab; die Ergebnisse werden
     additiv zusammengeführt. Aus ``features`` wird je Event
-    ``bezeichnung``/``art``/``beginn``/``ende`` (aus ``attributes`` per ``.get()``
-    mit None-Fallback, T-9-02; ``typ`` als String, Epoch-ms -> ISO-8601) und
-    ``lat``/``lon`` (repräsentativer Punkt) extrahiert.
+    ``name``/``event_type``/``event_type_label``/``start``/``end`` (aus
+    ``attributes`` per ``.get()`` mit None-Fallback, T-9-02; ``typ`` als String,
+    Epoch-ms -> ISO-8601) und ``lat``/``lon`` (repräsentativer Punkt) extrahiert.
+    Die alten deutschen Namen ``bezeichnung``/``art``/``beginn``/``ende`` bleiben
+    abgekündigt mit identischem Wert daneben stehen (Konsistenz-Audit
+    2026-07-25).
 
     Rückgabe-Keys (exakt das, was ``map_koeln_road_events`` erwartet): ``slug``
     und ``events``.
@@ -174,14 +203,33 @@ async def fetch_koeln_road_events(
             art = attributes.get(_FIELD_ART)
             # T-9-02: fehlendes Feld -> None (kein KeyError). typ ist ein
             # Integer-Code [VERIFIED 2026-06-10] und wird als String gereicht.
+            name = clean_text(attributes.get(_FIELD_BEZEICHNUNG))
+            art_code = str(art) if art is not None else None
+            start = _epoch_ms_to_iso(attributes.get(_FIELD_BEGINN))
+            end = _epoch_ms_to_iso(attributes.get(_FIELD_ENDE))
             events.append(
                 {
-                    "bezeichnung": attributes.get(_FIELD_BEZEICHNUNG),
-                    "art": str(art) if art is not None else None,
-                    "beginn": _epoch_ms_to_iso(attributes.get(_FIELD_BEGINN)),
-                    "ende": _epoch_ms_to_iso(attributes.get(_FIELD_ENDE)),
+                    # Kanonische Namen wie in allen anderen Datenarten
+                    # (Konsistenz-Audit 2026-07-25).
+                    "name": name,
+                    "start": start,
+                    "end": end,
+                    "event_type": art_code,
+                    # Klartext zum Integer-Code, damit die Zahl lesbar ist;
+                    # unbekannter Code oder Layer ohne Domain -> None statt
+                    # geratener Text.
+                    "event_type_label": (
+                        _ART_LABELS.get(art_code)
+                        if layer == _LAYER_WITH_DOMAIN and art_code is not None
+                        else None
+                    ),
                     "lat": feature_lat,
                     "lon": feature_lon,
+                    # Abgekuendigt (alte deutsche Namen), Werte identisch:
+                    "bezeichnung": name,
+                    "art": art_code,
+                    "beginn": start,
+                    "ende": end,
                 }
             )
 

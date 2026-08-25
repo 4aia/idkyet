@@ -42,10 +42,9 @@ def stream_entry(zip_path: str | Path, entry_name: str) -> Iterator[dict[str, st
     GB) gilt: nur zeilenweise streamen und im Aufrufer filtern, NIE komplett
     laden.
     """
-    with zipfile.ZipFile(zip_path) as z:
-        with z.open(entry_name) as raw:
-            text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="")
-            yield from csv.DictReader(text)
+    with zipfile.ZipFile(zip_path) as z, z.open(entry_name) as raw:
+        text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="")
+        yield from csv.DictReader(text)
 
 
 def stream_stops(zip_path: str | Path) -> Iterator[dict[str, str]]:

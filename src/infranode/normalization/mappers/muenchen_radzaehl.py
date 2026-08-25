@@ -1,4 +1,4 @@
-"""Mapper ``map_muenchen_radzaehl`` (DATA-40, Münchner Rad-Tageszählwerte, Tier A).
+"""Mapper ``map_muenchen_bike_counts`` (DATA-40, Münchner Rad-Tageszählwerte, Tier A).
 
 Übersetzt das rohe Adapter-dict (``slug``/``stations``/``as_of``) deterministisch
 in einen ``CanonicalRecord`` mit ``CountStationPayload`` (kanonische Zählstellen-
@@ -23,7 +23,7 @@ from infranode.normalization import (
     SourceId,
 )
 
-# Attribution wortgenau wie in sources.SOURCE_LICENSE["muenchen_radzaehl"]
+# Attribution wortgenau wie in sources.SOURCE_LICENSE["muenchen_bike_counts"]
 # (T-11-SRC-DRIFT): die DL-DE/BY-Namensnennung ist "Landeshauptstadt München".
 _LICENSE_URL = "https://www.govdata.de/dl-de/by-2-0"
 _ATTRIBUTION = "Landeshauptstadt München"
@@ -58,7 +58,7 @@ def _directions(station: dict) -> dict | None:
     return out or None
 
 
-def map_muenchen_radzaehl(
+def map_muenchen_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -96,7 +96,7 @@ def map_muenchen_radzaehl(
         geo=None,
         observed_at=_parse_datum(raw.get("as_of")),
         retrieved_at=retrieved_at,
-        source=SourceId.MUENCHEN_RADZAEHL,
+        source=SourceId.MUENCHEN_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

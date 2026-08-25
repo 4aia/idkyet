@@ -6,6 +6,7 @@ import Docs from "../../../layouts/Docs.astro";
 import JsonLd from "../../../components/JsonLd.astro";
 import { topics, topicCityCount } from "../../../data/topics";
 import coverage from "../../../data/coverage.json";
+import cities from "../../../data/cities.json";
 import { API_BASE } from "../../../lib/codegen";
 
 export function getStaticPaths() {
@@ -20,6 +21,19 @@ const t = topic.en;
 const cityCount = topicCityCount(topic, coverage);
 const exampleUrl = `${API_BASE}${topic.examplePath}`;
 const others = topics.filter((o) => o.id !== topic.id);
+const topCities = (() => {
+  const allowed =
+    topic.coverageKey === "all"
+      ? null
+      : new Set(
+          ((coverage as { partial: Record<string, string[]> }).partial[topic.coverageKey] ??
+            []) as string[],
+        );
+  return (cities as { slug: string; name: string; population: number }[])
+    .filter((c) => allowed === null || allowed.has(c.slug))
+    .sort((a, b) => b.population - a.population)
+    .slice(0, 10);
+})();
 ---
 
 <Docs
@@ -60,7 +74,7 @@ const others = topics.filter((o) => o.id !== topic.id);
 
   <h2>What data you get</h2>
   <p>{t.dataDesc}</p>
-  <ul>
+  <ul class="fields">
     {t.vars.map((v) => <li>{v}</li>)}
   </ul>
   <p>
@@ -85,6 +99,23 @@ const others = topics.filter((o) => o.id !== topic.id);
     </p>
   </div>
 
+  {
+    topic.id === "public-tenders" && (
+      <p class="gpt-callout">
+        This data is also available conversationally: the{" "}
+        <a
+          href="https://chatgpt.com/g/g-6a4e07c8e9888191855f053e98e03bc3"
+          rel="noopener"
+          target="_blank"
+        >
+          VergabePilot GPT
+        </a>{" "}
+        searches tenders directly in ChatGPT.{" "}
+        <a href="/en/gpts/">All InfraNode GPTs</a>.
+      </p>
+    )
+  }
+
   <h2>Covered cities</h2>
   <p>{t.coverageNote}</p>
   <p>
@@ -97,6 +128,21 @@ const others = topics.filter((o) => o.id !== topic.id);
     <a href="/en/coverage/">coverage and status page</a>, the full list of cities
     on the <a href="/en/cities/">cities overview</a>.
   </p>
+
+  {
+    topCities.length > 0 && (
+      <p>
+        Straight to the largest covered cities:{" "}
+        {topCities.map((c, i) => (
+          <>
+            {i > 0 && ", "}
+            <a href={`/en/cities/${c.slug}/`}>{c.name}</a>
+          </>
+        ))}
+        .
+      </p>
+    )
+  }
 
   <h2>Endpoint reference</h2>
   <p>
@@ -153,12 +199,24 @@ const others = topics.filter((o) => o.id !== topic.id);
     gap: 0.6rem;
     margin: 0;
   }
+  /* Field lists run up to ten entries per data type. From tablet width they
+     sit in two columns, which halves the scan height; entries are never split
+     across the column break. Below 48rem it stays a single column. */
+  .fields li {
+    break-inside: avoid;
+  }
+  @media (min-width: 48rem) {
+    .fields {
+      columns: 2;
+      column-gap: 2.5rem;
+    }
+  }
   .cta__btn {
     display: inline-block;
-    padding: 0.45rem 0.9rem;
+    padding: 0.6rem 1rem;
     border-radius: 8px;
     background: var(--color-primary);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
     text-decoration: none;
   }

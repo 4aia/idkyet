@@ -42,7 +42,7 @@ class CityRegistryEntry(BaseModel):
     gtfs_stop_ref: str | None = None
     # Abdeckungsgrad (Expansion 2026-06): "full" = handverifizierte Kern-Stadt mit
     # allen Quellen inkl. hand-kuratierter Maps (LHP-Pegel, DWD-Pollen-Region,
-    # DIVI-Kreis, Stadt-Baustellen-Connector); "auto" = über 100k-EW-Stadt, die
+    # Stadt-Baustellen-Connector); "auto" = über 100k-EW-Stadt, die
     # NUR von den AGS-/geo-automatischen Tier-A-Quellen bedient wird, hand-
     # kuratierte Quellen liefern ehrliches no_data. Default "full" (Kern-Register).
     coverage: str = Field(default="full", pattern=r"^(full|auto)$")

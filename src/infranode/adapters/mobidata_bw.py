@@ -31,7 +31,7 @@ KEINEN ``CanonicalRecord`` (das macht der Mapper) und kennt KEIN Cache/Breaker
 from __future__ import annotations
 
 import io
-from xml.etree.ElementTree import iterparse  # noqa: S405
+from xml.etree.ElementTree import iterparse
 
 import httpx
 
@@ -97,7 +97,7 @@ def parse_mobidata_datex2(
 
     events: list[dict] = []
     bio = io.BytesIO(xml_bytes)
-    # noqa S314: stdlib-Parse bewusst gewählt (Decision 1, stdlib-only). Die
+
     # XXE/DoS-Mitigation ist der Pre-Parse-Guard + Size-Cap oben (untrusted Live-
     # Feed, anders als der trusted Offline-Bulk in ingest/mastr.py).
     for _event, elem in iterparse(bio):  # noqa: S314

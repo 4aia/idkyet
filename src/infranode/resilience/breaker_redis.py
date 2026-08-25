@@ -90,7 +90,7 @@ class RedisBreakerRegistry(BreakerRegistry):
         """
         try:
             raw = await self._redis.get(self._key(source))
-        except Exception as exc:  # noqa: BLE001 - Redis-Fehler -> in-memory-Fallback
+        except Exception as exc:
             log.debug("breaker_hydrate_failed", source=source, error=type(exc).__name__)
             return
         if raw is None:
@@ -125,5 +125,5 @@ class RedisBreakerRegistry(BreakerRegistry):
         )
         try:
             await self._redis.set(self._key(source), payload, ex=_STATE_TTL)
-        except Exception as exc:  # noqa: BLE001 - Persist-Verlust ist nicht fatal
+        except Exception as exc:
             log.debug("breaker_persist_failed", source=source, error=type(exc).__name__)

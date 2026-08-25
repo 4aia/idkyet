@@ -55,12 +55,52 @@ const PARTIAL = [
     note: "",
   },
   {
+    key: "council-papers",
+    label: "Council information",
+    path: "/api/v1/cities/{slug}/council-papers",
+    op: "getCityCouncilPapers",
+    reason: "licence-cleared OParl endpoints per city (5 cities)",
+    note: "",
+  },
+  {
     key: "parking",
     label: "Parking occupancy",
     path: "/api/v1/cities/{slug}/parking",
     op: "getCityParking",
     reason: "ParkenDD live (13 license-verified cities) + Munich static catalogue",
+    note: "Cities with a frozen ParkenDD timestamp (older than 48 h) honestly answer no_data until the origin delivers again.",
+  },
+  {
+    key: "parking-onstreet",
+    label: "On-street parking",
+    path: "/api/v1/cities/{slug}/parking-onstreet",
+    op: "getCityParkingOnstreet",
+    reason: "municipal parking data per city (Munich only)",
+    note: "Master data without occupancy: spaces and parking rule per street section, aggregated per rule, street and parking management area.",
+  },
+  {
+    key: "park-and-ride",
+    label: "Park & ride facilities",
+    path: "/api/v1/cities/{slug}/park-and-ride",
+    op: "getCityParkAndRide",
+    reason: "municipal park & ride operator data per city (Munich only)",
+    note: "Occupancy is a forecast from historical experience, not live occupancy.",
+  },
+  {
+    key: "mobility-points",
+    label: "Mobility points",
+    path: "/api/v1/cities/{slug}/mobility-points",
+    op: "getCityMobilityPoints",
+    reason: "municipal mobility point data per city (Munich only)",
     note: "",
+  },
+  {
+    key: "bike-parking",
+    label: "Bike parking",
+    path: "/api/v1/cities/{slug}/bike-parking",
+    op: "getCityBikeParking",
+    reason: "municipal bike parking data per city (Munich only)",
+    note: "Only the in-service stock is counted. Planned, removed and out-of-service facilities are reported as separate figures.",
   },
   {
     key: "bike-counts",
@@ -209,6 +249,27 @@ const partialMap: Record<string, string[]> = coverage.partial;
       <code>?station=</code>. Tier C live-only.
     </li>
     <li>
+      <a href="/en/api/getLiveFrankfurtDepartures/"><strong>RMV departures (Frankfurt)</strong></a>
+      (<code>/api/v1/live/frankfurt-am-main/departures</code>): real-time departure
+      board per Rhine-Main station from the RMV HAPI (HAFAS ReST), including delay.
+      Frankfurt/Rhine-Main only (RMV area), station name via <code>?station=</code>.
+      Tier C live-only.
+    </li>
+    <li>
+      <a href="/en/api/getLiveVrrDepartures/"><strong>VRR departures (Rhine-Ruhr)</strong></a>
+      (<code>/api/v1/live/{"{slug}"}/departures</code>): real-time departure board
+      per station from the key-less Mentz EFA (efa.vrr.de), including delay. For
+      the six VRR core cities Düsseldorf, Dortmund, Essen, Duisburg, Bochum and
+      Wuppertal; station name via <code>?station=</code>. Tier C live-only.
+    </li>
+    <li>
+      <a href="/en/api/getLiveVrrDepartures/"><strong>VVS departures (Stuttgart)</strong></a>
+      (<code>/api/v1/live/stuttgart/departures</code>): real-time departure board
+      per station from the key-less Mentz EFA (www3.vvs.de), including delay. For
+      Stuttgart (VVS), a second EFA instance via the same generic adapter; station
+      name via <code>?station=</code>. Tier C live-only.
+    </li>
+    <li>
       <a href="/en/api/getCityStationDepartures/"><strong>Per-city station departures</strong></a>
       and <a href="/en/api/getCityStationArrivals/"><strong>arrivals</strong></a>
       (<code>/api/v1/cities/{"{slug}"}/station-departures</code> and
@@ -298,11 +359,11 @@ const partialMap: Record<string, string[]> = coverage.partial;
     text-decoration: none;
     padding: 0.55rem 1.1rem;
     border-radius: 6px;
-    background: var(--color-accent);
-    color: #fff;
+    background: var(--color-accent-strong);
+    color: var(--on-accent);
   }
   .status-card__btn:hover {
-    background: var(--color-accent-strong);
+    background: var(--color-accent);
   }
   table.cov {
     width: 100%;
@@ -360,9 +421,9 @@ const partialMap: Record<string, string[]> = coverage.partial;
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #9a5b00;
-    background: #fbf3e2;
-    border: 1px solid #ecd9b0;
+    color: var(--warn-fg);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
     border-radius: 3px;
     padding: 0.05rem 0.4rem;
     vertical-align: middle;

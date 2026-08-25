@@ -108,7 +108,6 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
     DataType("sharing", "sharing", "Bike- & Scooter-Sharing", "Bike & scooter sharing"),
     DataType("pois", "pois", "Points of Interest", "Points of interest"),
     DataType("health", "health", "Krankenhäuser", "Hospitals"),
-    DataType("icu-live", "icu_live", "Intensivbetten (live)", "ICU beds (live)"),
     DataType("water-level", "water_level", "Pegelstände", "Water levels"),
     DataType("flood", "flood", "Hochwasserwarnungen", "Flood warnings"),
     DataType("geo", "geo", "Geodaten & Grenzen", "Geodata & boundaries"),
@@ -119,6 +118,57 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
         "Sozioökonomische Indikatoren",
         "Socioeconomic indicators",
     ),
+    # Wegweiser Kommune (CC0): SDG-Indikatoren als ZEITREIHE (2006-2023), nicht
+    # als Einzelwert wie "indicators" (INKAR). Voll abgedeckt, laeuft ueber
+    # get_city_resource.
+    DataType(
+        "sustainability",
+        "sustainability",
+        "Nachhaltigkeit & SDG-Indikatoren",
+        "Sustainability & SDG indicators",
+    ),
+    # Die uebrigen Wegweiser-Datenarten (CC0), alle als ZEITREIHE. Voll
+    # abgedeckt bis auf childcare (83), care (73) und education-stats (70),
+    # die in registry.coverage als Teilabdeckung stehen.
+    DataType(
+        "population-structure",
+        "population_structure",
+        "Altersaufbau der Bevölkerung",
+        "Population age structure",
+    ),
+    DataType(
+        "population-trend",
+        "population_trend",
+        "Bevölkerungsentwicklung",
+        "Population trend",
+    ),
+    DataType(
+        "municipal-finance",
+        "municipal_finance",
+        "Kommunale Finanzen",
+        "Municipal finances",
+    ),
+    DataType(
+        "labour-market",
+        "labour_market",
+        "Arbeitsmarkt & Pendler",
+        "Labour market & commuters",
+    ),
+    DataType("integration", "integration", "Integration", "Integration"),
+    DataType("childcare", "childcare", "Kinderbetreuung", "Childcare"),
+    DataType(
+        "education-stats",
+        "education_stats",
+        "Bildungsstatistik",
+        "Education statistics",
+    ),
+    DataType(
+        "social-situation",
+        "social_situation",
+        "Soziale Lage",
+        "Social situation",
+    ),
+    DataType("care", "care", "Pflege", "Long-term care"),
     DataType("unemployment", "unemployment", "Arbeitslosigkeit", "Unemployment"),
     DataType(
         "tourism", "tourism", "Tourismus (Übernachtungen)", "Tourism (overnight stays)"
@@ -233,6 +283,43 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
         "office_wait_times",
         "Behörden-Wartezeiten (live)",
         "Government office wait times (live)",
+    ),
+    # Quick-260708-tsv: kommunale Ratsinformationen (OParl "Paper" = Vorlagen,
+    # Anträge, Beschlüsse) je Stadt, Tier A, Teilabdeckung (5 lizenzgeklärte
+    # Städte). key/tool ASCII (Pfadsegment), Label mit korrektem Umlaut. Kein
+    # Eintrag in _NAMED_TOOLS -> läuft über get_city_resource.
+    DataType(
+        "council-papers",
+        "get_city_resource",
+        "Ratsinformationen",
+        "Council papers",
+    ),
+    # Quick-260729-muc: ruhender Verkehr je Stadt (Tier A, keylos, Teilabdeckung
+    # nur muenchen). key/tool ASCII (Pfadsegment), Label mit korrektem Umlaut.
+    # Kein Eintrag in _NAMED_TOOLS -> laeuft ueber get_city_resource.
+    DataType(
+        "parking-onstreet",
+        "get_city_resource",
+        "Strassenparkraum",
+        "On-street parking",
+    ),
+    DataType(
+        "park-and-ride",
+        "get_city_resource",
+        "P+R- und B+R-Anlagen",
+        "Park & ride facilities",
+    ),
+    DataType(
+        "mobility-points",
+        "get_city_resource",
+        "Mobilitaetspunkte",
+        "Mobility points",
+    ),
+    DataType(
+        "bike-parking",
+        "get_city_resource",
+        "Radparken",
+        "Bike parking",
     ),
 )
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from infranode.api import path_hints
 from infranode.api.responses import OrjsonResponse
 
 log = structlog.get_logger()
@@ -174,7 +175,14 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         hint = None
         if exc.status_code == 404:
-            hint = "Pfad prüfen oder GET /api/v1/openapi.yaml für die Routenliste."
+            # Unbekannte Pfade unter /api/v1/ bekommen einen agentenfreundlichen
+            # Struktur- + did-you-mean-Hint (DX-404-HINT). Fachliche 404s (unbekannte
+            # Stadt) sind NotFoundError/AppError und laufen ueber _app_error, nicht
+            # hierher; sie bleiben strukturell unberuehrt (T-404-03).
+            if path_hints.path_is_under_api_v1(request.url.path):
+                hint = path_hints.build_unknown_path_hint(request.url.path)
+            else:
+                hint = "Pfad prüfen oder GET /api/v1/openapi.yaml für die Routenliste."
         elif exc.status_code == 405:
             # Erlaubte Methoden aus dem Allow-Header durchreichen, falls gesetzt.
             allowed = exc.headers.get("Allow") if exc.headers else None

@@ -40,7 +40,7 @@ def map_koeln_road_events(
     """Bildet rohe Kölner Road-Events auf einen ``CanonicalRecord`` (Tier A) ab.
 
     Die ``events`` (Baustellen/Verkehrsbeeintraechtigungen, DATA-15) wandern
-    unverändert in den ``RoadEventPayload`` (``city_source="koeln_verkehr"``).
+    unverändert in den ``RoadEventPayload`` (``city_source="koeln_road_events"``).
     Der ``retrieved_at``-Zeitstempel wird injiziert (keine Systemuhr im Mapper),
     damit das Ergebnis deterministisch bleibt. Die Join-Keys
     ``ags``/``wikidata_qid`` werden aus dem Register durchgereicht (Default
@@ -52,7 +52,7 @@ def map_koeln_road_events(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.KOELN_VERKEHR,
+        source=SourceId.KOELN_ROAD_EVENTS,
         license_id=LicenseId.DL_DE_ZERO_2_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -62,7 +62,7 @@ def map_koeln_road_events(
             license_url=_DL_DE_ZERO_URL,
         ),
         payload=RoadEventPayload(
-            city_source="koeln_verkehr",
+            city_source="koeln_road_events",
             events=raw.get("events", []),
         ),
     )

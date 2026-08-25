@@ -28,6 +28,7 @@ Sicherheit:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 import httpx
 
@@ -56,11 +57,62 @@ def _parse_gbfs_ts(value: object) -> str | None:
     return None
 
 
+def _gbfs_text(value: object) -> str | None:
+    """GBFS-Freitext (name/operator/station-name) -> String (rein).
+
+    GBFS v2 liefert einen blanken String, v3 ein ``[{"language","text"}]``-Array
+    (localized string). Bevorzugt ``de``, sonst die erste nicht-leere Sprache.
+    Ein String wird unveraendert (getrimmt, leer -> None) zurueckgegeben, damit
+    die bestehenden v2-Systeme (Nextbike/MobiData) unveraendert funktionieren.
+    """
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        by_lang = {
+            e.get("language"): e.get("text")
+            for e in value
+            if isinstance(e, dict) and isinstance(e.get("text"), str)
+        }
+        return by_lang.get("de") or next(
+            (t for t in by_lang.values() if t and t.strip()), None
+        )
+    return None
+
+
 # Host hartkodiert (SSRF, T-05-08): die Nextbike-GBFS-Auslieferung.
 _BASE = "https://gbfs.nextbike.net"
 # Discovery-Pfad je System (GBFS v2). Die system_id stammt NUR aus der kuratierten
 # Allowlist (cities.GBFS_SYSTEMS), nie aus User-Input.
 _DISCOVERY = "/maps/gbfs/v2/{system_id}/gbfs.json"
+
+# Attribution der Nextbike-Primaerquelle (CC0). Verbatim wie in DATA-LICENSES.md +
+# SOURCE_LICENSE. Wird verwendet, wenn eine GbfsSystem-Spec keine eigene
+# Attribution traegt (also fuer alle rohen Nextbike-System-Strings).
+_NEXTBIKE_ATTRIBUTION = "nextbike GmbH / GBFS (CC0)"
+
+
+class GbfsSystem(NamedTuple):
+    """Kuratierte GBFS-System-Spec (Basis-URL, Discovery-Pfad, Lizenz-Override).
+
+    T-05-08 / T-9q0-01 (SSRF): ``base_url`` und ``discovery_path`` werden
+    AUSSCHLIESSLICH in der kuratierten Registry (``cities.GBFS_SYSTEMS``)
+    hartkodiert gesetzt, NIE aus einem Slug oder anderem User-Input gebaut. Die
+    Defaults zeigen weiter auf die Nextbike-Auslieferung, damit ein roher
+    ``system_id``-String unveraendert wie bisher funktioniert.
+
+    ``license_override`` deckt kuratierte Tier-A-Quellen ab, deren GBFS-Feed KEIN
+    ``system_information.license_id`` fuehrt (z.B. der MobiData-BW-Aggregator,
+    DB Call a Bike, DL-DE/BY-2.0, Quelle mobidata-bw.de/dataset/bikesh). Der
+    Override laeuft durch dieselbe fail-closed ``_tier_a_license``-Allowlist: ohne
+    ``license_id`` UND ohne kuratierten Tier-A-Override wird das System verworfen.
+    """
+
+    system_id: str
+    base_url: str = _BASE
+    discovery_path: str = _DISCOVERY
+    license_override: str | None = None
+    attribution: str | None = None
+
 
 # Obergrenze der je Anbieter ausgelieferten Stationsliste (Payload-/Archiv-Groesse:
 # Großstadt-Systeme wie nextbike Berlin haben >1000 Stationen). ``station_count``
@@ -100,10 +152,8 @@ def _feeds(discovery: dict) -> dict[str, str]:
     die erste vorhandene Sprache.
     """
     data = discovery.get("data") or {}
-    if "feeds" in data:  # GBFS v3: keine Sprach-Ebene mehr.
-        langs = {"_": data}
-    else:
-        langs = data
+    # GBFS v3 traegt "feeds" direkt (keine Sprach-Ebene mehr).
+    langs = {"_": data} if "feeds" in data else data
     block = langs.get("de") or (next(iter(langs.values()), {}) if langs else {})
     return {f.get("name"): f.get("url") for f in block.get("feeds", []) if f.get("url")}
 
@@ -183,11 +233,16 @@ def _stations(
             and live.get("is_renting", True) is not False
             and live.get("is_disabled", False) is not True
         )
-        bikes_available = live.get("num_bikes_available") if rentable else 0
+        # GBFS v3 benennt ``num_bikes_available`` -> ``num_vehicles_available``;
+        # v2-Fallback fuer die bestehenden Nextbike/MobiData-Systeme.
+        available = live.get("num_vehicles_available")
+        if available is None:
+            available = live.get("num_bikes_available")
+        bikes_available = available if rentable else 0
         out.append(
             {
                 "station_id": st.get("station_id"),
-                "name": st.get("name"),
+                "name": _gbfs_text(st.get("name")),
                 "lat": float(slat),
                 "lon": float(slon),
                 "capacity": st.get("capacity"),
@@ -200,21 +255,29 @@ def _stations(
 
 
 async def _fetch_system(
-    http: httpx.AsyncClient, *, system_id: str, lat: float, lon: float, radius: float
+    http: httpx.AsyncClient, *, spec: GbfsSystem, lat: float, lon: float, radius: float
 ) -> dict | None:
     """Holt EIN GBFS-System und aggregiert es (fail-closed Tier-A, rein gegen Schema).
 
     Rückgabe ist ein provider-dict oder ``None``, wenn die Lizenz nicht Tier-A ist
-    (fail-closed verworfen). Aggregiert free-floating- + stationsgebundene
-    Fahrzeuge in der Stadt-BBox.
+    (fail-closed verworfen). Die Discovery-URL wird aus der kuratierten Spec gebaut
+    (``spec.base_url`` + ``spec.discovery_path``, NIE User-Input -> T-05-08/T-9q0-01).
+    Aggregiert free-floating- + stationsgebundene Fahrzeuge in der Stadt-BBox.
     """
-    discovery = await _get_json(http, _BASE + _DISCOVERY.format(system_id=system_id))
+    system_id = spec.system_id
+    discovery_url = spec.base_url + spec.discovery_path.format(system_id=system_id)
+    discovery = await _get_json(http, discovery_url)
     feeds = _feeds(discovery)
 
     info: dict = {}
     if "system_information" in feeds:
         info = await _get_json(http, feeds["system_information"])
-    license_tag = _tier_a_license((info.get("data") or {}).get("license_id"))
+    # Lizenz fail-closed aufloesen: erst der GBFS-eigene license_id, sonst der
+    # kuratierte Tier-A-Override der Spec (z.B. MobiData BW / DB Call a Bike liefert
+    # kein license_id-Feld, Quelle mobidata-bw.de/dataset/bikesh). Beides laeuft
+    # durch DIESELBE _tier_a_license-Allowlist; None -> System verworfen (GOV-02/04).
+    license_raw = (info.get("data") or {}).get("license_id") or spec.license_override
+    license_tag = _tier_a_license(license_raw)
     if license_tag is None:
         # Fail-closed (GOV-02/04): keine anerkannte permissive Lizenz -> verwerfen.
         return None
@@ -247,10 +310,13 @@ async def _fetch_system(
         stations, key=lambda s: s["bikes_available"] or 0, reverse=True
     )[:_MAX_STATIONS]
     return {
-        "provider": sysdata.get("name") or system_id,
-        "operator": sysdata.get("operator"),
+        "provider": _gbfs_text(sysdata.get("name")) or system_id,
+        "operator": _gbfs_text(sysdata.get("operator")),
         "system_id": sysdata.get("system_id") or system_id,
         "license_id": license_tag,
+        # Attribution je Anbieter aus der Spec (sonst Nextbike-Default). Der Mapper
+        # leitet daraus die record-weite Attribution/Lizenz ab.
+        "attribution": spec.attribution or _NEXTBIKE_ATTRIBUTION,
         "free_floating_available": free_floating,
         "docked_available": docked,
         "station_count": len(stations),
@@ -265,7 +331,7 @@ async def fetch_sharing(
     slug: str,
     lat: float,
     lon: float,
-    systems: tuple[str, ...],
+    systems: tuple[str | GbfsSystem, ...],
     radius_km: float = 15.0,
 ) -> dict:
     """Holt + aggregiert die GBFS-Sharing-Daten der kuratierten Systeme einer Stadt.
@@ -279,9 +345,13 @@ async def fetch_sharing(
     mappt das auf ``no_data``). ``raise_for_status`` ist Pflicht (5xx -> Fassade).
     """
     providers: list[dict] = []
-    for system_id in systems:
+    for entry in systems:
+        # Rohe Nextbike-Strings bleiben unveraendert nutzbar (Default-Spec zeigt auf
+        # gbfs.nextbike.net); eine GbfsSystem-Spec traegt eigene Basis/Discovery-URL
+        # + kuratierten Lizenz-Override.
+        spec = entry if isinstance(entry, GbfsSystem) else GbfsSystem(entry)
         provider = await _fetch_system(
-            http, system_id=system_id, lat=lat, lon=lon, radius=radius_km
+            http, spec=spec, lat=lat, lon=lon, radius=radius_km
         )
         if provider is not None:
             providers.append(provider)

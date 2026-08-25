@@ -1,7 +1,7 @@
 """Reiner Dortmund-Mapper map_dortmund_road_events (DATA-15, Tier A DL-DE/Zero).
 
 Übersetzt das rohe Adapter-dict (``slug``/``events``) deterministisch in einen
-``CanonicalRecord`` mit ``RoadEventPayload`` (``city_source="dortmund_baustellen"``).
+``CanonicalRecord`` mit ``RoadEventPayload`` (``city_source="dortmund_roadworks"``).
 Rein: kein HTTP, kein Logging, keine Systemuhr (``retrieved_at`` injiziert).
 
 Die tagesaktuellen Baustellen der Stadt Dortmund (Opendatasoft-Portal
@@ -26,6 +26,33 @@ from infranode.normalization import (
 
 _DL_DE_ZERO_URL = "https://www.govdata.de/dl-de/zero-2-0"
 
+# Alter deutscher Event-Key -> kanonischer englischer Key (Abkündigung
+# 2026-08-01). Der Adapter dupliziert bereits beim Holen; der Backfill hier
+# schließt die Übergangslücke für Roh-Antworten aus dem Redis-Cache, die vor
+# dem Deploy entstanden sind und nur die deutschen Keys tragen (Muster
+# mappers/tree_cadastre.py). Gesetzt wird nur, wenn der neue Key fehlt.
+_CANONICAL_KEYS: dict[str, str] = {
+    "beschreibung": "description",
+    "auftraggeber": "client",
+    "einschraenkung": "restriction",
+    "zeitraum": "period",
+    "von": "start",
+    "bis": "end",
+    "stadtbezirk": "district",
+}
+
+
+def _backfill_events(events: list[dict]) -> list[dict]:
+    """Ergänzt fehlende kanonische Keys aus den abgekündigten deutschen Keys."""
+    result: list[dict] = []
+    for event in events:
+        item = dict(event)
+        for old, new in _CANONICAL_KEYS.items():
+            if new not in item and old in item:
+                item[new] = item[old]
+        result.append(item)
+    return result
+
 
 def map_dortmund_road_events(
     raw: dict,
@@ -37,7 +64,7 @@ def map_dortmund_road_events(
     """Bildet rohe Dortmunder Road-Events auf einen ``CanonicalRecord`` (Tier A) ab.
 
     Die ``events`` (Baustellen, DATA-15) wandern unverändert in den
-    ``RoadEventPayload`` (``city_source="dortmund_baustellen"``). Der
+    ``RoadEventPayload`` (``city_source="dortmund_roadworks"``). Der
     ``retrieved_at``-Zeitstempel wird injiziert (keine Systemuhr im Mapper). Die
     Join-Keys ``ags``/``wikidata_qid`` kommen aus dem Register (Default ``None``).
     Verkehrsereignisse tragen ihre Zeit/Geometrie je Event, daher ``observed_at``
@@ -48,7 +75,7 @@ def map_dortmund_road_events(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.DORTMUND_BAUSTELLEN,
+        source=SourceId.DORTMUND_ROADWORKS,
         license_id=LicenseId.DL_DE_ZERO_2_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -58,7 +85,7 @@ def map_dortmund_road_events(
             license_url=_DL_DE_ZERO_URL,
         ),
         payload=RoadEventPayload(
-            city_source="dortmund_baustellen",
-            events=raw.get("events", []),
+            city_source="dortmund_roadworks",
+            events=_backfill_events(raw.get("events", [])),
         ),
     )

@@ -95,7 +95,7 @@ def map_koeln_traffic_flow(
 def map_koeln_road_events(
     raw: dict,
     *,
-    source: SourceId = SourceId.KOELN_BAUSTELLEN_LIVE,
+    source: SourceId = SourceId.KOELN_ROADWORKS_LIVE,
     retrieved_at: datetime,
     ags: str | None = None,
     wikidata_qid: str | None = None,
@@ -105,7 +105,7 @@ def map_koeln_road_events(
     Die ``events`` (Baustellen/Ereignisse, LIVE-07) wandern in den
     ``RoadEventPayload`` (``city_source="koeln"``). ``source`` wählt die
     SourceId je Route (Baustellen vs. Ereignisse, Default
-    ``KOELN_BAUSTELLEN_LIVE``). ``observed_at`` aus der DATEX-II
+    ``KOELN_ROADWORKS_LIVE``). ``observed_at`` aus der DATEX-II
     ``publicationTime`` (``as_of``) falls vorhanden. ``retrieved_at`` injiziert
     (keine Systemuhr im Mapper).
     """

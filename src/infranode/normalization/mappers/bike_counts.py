@@ -98,7 +98,7 @@ def _parse_iso(value: object) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
 
 
-def map_leipzig_radzaehl(
+def map_leipzig_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -118,7 +118,7 @@ def map_leipzig_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.LEIPZIG_RADZAEHL,
+        source=SourceId.LEIPZIG_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         attribution_text="Stadt Leipzig",
@@ -126,7 +126,7 @@ def map_leipzig_radzaehl(
     )
 
 
-def map_hamburg_radzaehl(
+def map_hamburg_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -146,7 +146,7 @@ def map_hamburg_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.HAMBURG_RADZAEHL,
+        source=SourceId.HAMBURG_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         attribution_text=(
@@ -156,7 +156,7 @@ def map_hamburg_radzaehl(
     )
 
 
-def map_berlin_radzaehl(
+def map_berlin_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -177,7 +177,7 @@ def map_berlin_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.BERLIN_RADZAEHL,
+        source=SourceId.BERLIN_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_ZERO_2_0,
         license_tier=LicenseTier.A,
         attribution_text=(
@@ -187,7 +187,7 @@ def map_berlin_radzaehl(
     )
 
 
-def map_stuttgart_radzaehl(
+def map_stuttgart_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -208,7 +208,7 @@ def map_stuttgart_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.STUTTGART_RADZAEHL,
+        source=SourceId.STUTTGART_BIKE_COUNTS,
         license_id=LicenseId.CC_BY_4_0,
         license_tier=LicenseTier.A,
         attribution_text="Landeshauptstadt Stuttgart",
@@ -216,7 +216,7 @@ def map_stuttgart_radzaehl(
     )
 
 
-def map_koeln_radzaehl(
+def map_koeln_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -237,7 +237,7 @@ def map_koeln_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.KOELN_RADZAEHL,
+        source=SourceId.KOELN_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_ZERO_2_0,
         license_tier=LicenseTier.A,
         attribution_text="Stadt Köln",
@@ -245,7 +245,7 @@ def map_koeln_radzaehl(
     )
 
 
-def map_essen_radzaehl(
+def map_essen_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -266,7 +266,7 @@ def map_essen_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.ESSEN_RADZAEHL,
+        source=SourceId.ESSEN_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         attribution_text="Stadt Essen",
@@ -274,7 +274,7 @@ def map_essen_radzaehl(
     )
 
 
-def map_duesseldorf_radzaehl(
+def map_duesseldorf_bike_counts(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -297,7 +297,7 @@ def map_duesseldorf_radzaehl(
         retrieved_at=retrieved_at,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        source=SourceId.DUESSELDORF_RADZAEHL,
+        source=SourceId.DUESSELDORF_BIKE_COUNTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         attribution_text="Landeshauptstadt Düsseldorf",

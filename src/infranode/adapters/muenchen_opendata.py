@@ -185,16 +185,30 @@ async def fetch_muenchen_road_events(
         geometry = feature.get("geometry") or {}
         feature_lon, feature_lat = _representative_point(geometry)
         # T-9-02: fehlendes Feld -> None (kein KeyError).
+        street = props.get(_FIELD_STRASSE)
+        affected_areas = props.get(_FIELD_BEREICHE)
+        event_type = props.get(_FIELD_ART)
+        description = props.get(_FIELD_BESCHREIBUNG)
+        start = props.get(_FIELD_VON)
+        end = props.get(_FIELD_BIS)
         events.append(
             {
-                "strasse_hausnr": props.get(_FIELD_STRASSE),
-                "betroffene_bereiche": props.get(_FIELD_BEREICHE),
-                "art": props.get(_FIELD_ART),
-                "beschreibung": props.get(_FIELD_BESCHREIBUNG),
-                "von": props.get(_FIELD_VON),
-                "bis": props.get(_FIELD_BIS),
+                # Kanonische englische Namen (Muster koeln_arcgis).
+                "description": description,
+                "event_type": event_type,
+                "start": start,
+                "end": end,
+                "street": street,
+                "affected_areas": affected_areas,
                 "lat": feature_lat,
                 "lon": feature_lon,
+                # Abgekündigt (alte deutsche Namen), Werte identisch:
+                "strasse_hausnr": street,
+                "betroffene_bereiche": affected_areas,
+                "art": event_type,
+                "beschreibung": description,
+                "von": start,
+                "bis": end,
             }
         )
 
@@ -256,7 +270,7 @@ async def fetch_muenchen_parking(
             continue
         fmt = str(resource.get("format") or "").lower()
         url = resource.get("url")
-        if _PARKHAEUSER_RESOURCE_FORMAT == fmt and isinstance(url, str) and url:
+        if fmt == _PARKHAEUSER_RESOURCE_FORMAT and isinstance(url, str) and url:
             resource_url = url
             break
 

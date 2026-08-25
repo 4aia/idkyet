@@ -37,14 +37,24 @@ const cityEndpoints = (await getCollection("endpoints"))
     example: e.data.path.replace(/\{[^}]+\}/, city.slug),
   }))
   .sort((a, b) => a.summary.localeCompare(b.summary, "de"));
-// Titel-Budget: 53 Zeichen (SeoHead haengt " | InfraNode" an, Gesamt max 65,
+// Titel-Budget: 53 Zeichen (SeoHead hängt " | InfraNode" an, Gesamt max 65,
 // Bing-Scan 2026-07-01). Lange Form nur, wenn sie ins Budget passt, sonst
-// kompakte Form fuer lange Stadtnamen (z.B. Ludwigshafen am Rhein).
+// kompakte Form für lange Stadtnamen (z.B. Ludwigshafen am Rhein).
 const metaTitleLong = `Open-Data-API für ${city.name}: kostenlos und keylos`;
 const metaTitle = metaTitleLong.length <= 53 ? metaTitleLong : `Open-Data-API für ${city.name}, keylos`;
 const lead = `Offene Daten für ${city.name} (${stateName}) über eine kostenlose, keylose REST-API: Wetter, Luftqualität, Strompreis und mehr, einheitlich als JSON mit Quelle und Lizenz je Antwort. Kein API-Schlüssel, keine Anmeldung.`;
 const weatherExample = `${API_BASE}/api/v1/cities/${city.slug}/weather`;
 const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
+
+// Stadtspezifische Live-GPTs im ChatGPT Store (nur diese vier Städte haben ein
+// eigenes GPT). Die Übersicht /gpts/ wird für jede Stadt verlinkt.
+const cityGpts: Record<string, string> = {
+  berlin: "https://chatgpt.com/g/g-6a4cd71cfcfc819180c9eeafdd8a4ade",
+  hamburg: "https://chatgpt.com/g/g-6a4cd87576948191a94002e9ea5cacbd",
+  muenchen: "https://chatgpt.com/g/g-6a4cd95913cc81918e16c3e561a0bbc4",
+  koeln: "https://chatgpt.com/g/g-6a4cda23b8a08191815349e6f356a4b3",
+};
+const cityGpt = cityGpts[city.slug];
 ---
 
 <Docs
@@ -68,6 +78,8 @@ const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
       `Open Data ${city.name}`,
       `${city.name} API`,
       `Stadtdaten ${city.name}`,
+      `MCP Server ${city.name}`,
+      `${city.name} MCP`,
       "kostenlose API",
       "keylose API",
       "REST API",
@@ -88,6 +100,21 @@ const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
 
   <h1>Open-Data-API für {city.name}</h1>
   <p class="lead">{lead}</p>
+
+  <p class="gpt-callout">
+    {
+      cityGpt && (
+        <span>
+          Diese Stadt gibt es auch als ChatGPT-GPT:{" "}
+          <a href={cityGpt} rel="noopener" target="_blank">
+            {city.name} Live in ChatGPT öffnen
+          </a>
+          .{" "}
+        </span>
+      )
+    }
+    <a href="/gpts/">Alle InfraNode-GPTs</a>.
+  </p>
 
   <table class="cityfacts">
     <tbody>

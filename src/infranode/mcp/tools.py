@@ -37,6 +37,7 @@ or failing source degrades gracefully instead of raising. City slugs come from
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -44,12 +45,33 @@ from pydantic import Field
 from infranode.mcp import client
 from infranode.mcp.schemas import ToolEnvelope
 
+# Trip-Halt-IDs der Bahnhofstafeln (station_departures/station_arrivals) haben
+# das Muster <trip>-<YYMMDDHHMM>-<Halt-Index>, z. B.
+# "9127336349809054555-2607261306-1" oder "-7906017824379584014-2607260946-5"
+# (fuehrendes Minus = negative Trip-Nummer aus der DB-Quelle). Sie sind KEINE
+# Haltestellen-IDs. Die Tafeln tragen den Wert bis zum Ablauf der
+# Abkuendigungsfrist (Changelog 2026-07-25, Entfernung fruehestens 2026-08-24)
+# noch unter dem Zweitnamen ``stop_id``, weshalb Agenten ihn regelmaessig an
+# ``transit_departures`` weiterreichen und dort einen 400 ausloesen (live
+# beobachtet 2026-07-26, api-Log 11:16:08 UTC). Kollisionsfrei zur Allowlist der
+# Live-Route (``_STOP_ID_RE`` in api/v1/live.py): gueltige stop_ids sind
+# entweder ``de:<Ziffern>:<rest>`` oder rein numerisch, koennen dieses Muster
+# also nicht erfuellen.
+_TRIP_STOP_ID_RE = re.compile(r"^-?\d+-\d{10}-\d+$")
+
 # Most tools take a single ``slug``; the description is shared, the docstring's
 # first line gives the per-tool example so the inputSchema stays informative.
 _Slug = Annotated[
     str,
     Field(
-        description="City slug from the list_cities tool, e.g. 'berlin' or 'hamburg'."
+        description=(
+            "City identifier, e.g. 'berlin' or 'hamburg'. Resolved leniently: the "
+            "German name with or without umlauts, any casing, a common English "
+            "exonym or short form also works (München/munich/munchen -> muenchen, "
+            "cologne -> koeln, frankfurt -> frankfurt-am-main). An unknown name "
+            "returns 404 with a 'Meintest du ...?' suggestion. list_cities gives "
+            "the canonical slugs."
+        )
     ),
 ]
 
@@ -63,7 +85,10 @@ _Slug = Annotated[
 # und Pydantic ungueltige Werte schon vor dem Request abweist.
 GENERIC_RESOURCES: tuple[str, ...] = tuple(sorted(client.ALLOWED_RESOURCES - {"pois"}))
 _ResourceKey = Annotated[
-    Literal[GENERIC_RESOURCES],
+    # pyright kennt kein dynamisches Literal[<tuple>]; das Enum MUSS aber aus der
+    # Allowlist abgeleitet bleiben (eine Quelle der Wahrheit), Pydantic/FastMCP
+    # werten es zur Laufzeit korrekt aus.
+    Literal[GENERIC_RESOURCES],  # pyright: ignore[reportInvalidTypeForm]
     Field(
         description=(
             "Data type key to fetch, exactly as listed by get_city_overview / the "
@@ -101,14 +126,21 @@ async def get_city_overview(slug: _Slug) -> ToolEnvelope:
     return await client.get_resource(slug, "overview")
 
 
-async def get_city_resource(slug: _Slug, resource: _ResourceKey) -> ToolEnvelope:
+# pyright-ignore wie an der _ResourceKey-Definition: dynamisches Literal.
+async def get_city_resource(
+    slug: _Slug,
+    resource: _ResourceKey,  # pyright: ignore[reportInvalidTypeForm]
+) -> ToolEnvelope:
     """Fetch ANY per-city data type by its key (generic accessor, ~60 data types).
 
     One tool for the whole breadth of InfraNode: live data (air, traffic, transit
-    stops, parking, charging, water-level, flood, sharing, fuel-prices, icu-live,
+    stops, parking, charging, water-level, flood, sharing, fuel-prices,
     webcams, station-departures/-arrivals/stations, ...), statistics
     (demographics, unemployment, tourism, accidents, crime-stats, indicators,
-    land-values, tax-rates, insolvencies, ...), infrastructure and environment
+    land-values, tax-rates, insolvencies, ...), multi-year TIME SERIES
+    (``sustainability``: SDG indicators per municipality, one value per year from
+    2006 to 2023, so trends can be answered without stitching snapshots),
+    infrastructure and environment
     (solar, solar-roofs, district-heating, energy, heritage, tree-cadastre,
     playgrounds, public-toilets, markets, education, ...) and more. Discover the
     valid keys and per-city coverage with ``get_city_overview(slug)`` or the
@@ -143,7 +175,9 @@ async def weather(slug: _Slug) -> ToolEnvelope:
 
 async def pois(
     slug: _Slug,
-    type: Annotated[
+    # A002 unterdrueckt: der Parametername IST der oeffentliche MCP-Tool-
+    # Parameter ("type" im Tool-Schema), Umbenennung braeche den Tool-Vertrag.
+    type: Annotated[  # noqa: A002
         str,
         Field(
             description=(
@@ -209,7 +243,11 @@ async def transit_departures(
                 "Required stop ID to fetch departures for. Discover a city's stop "
                 "IDs with get_city_resource(slug, resource='transit') first (each "
                 "stop carries its id). Format: DELFI 'de:<AGS>:<id>' or a numeric "
-                "gtfs.de stop id."
+                "gtfs.de stop id. NOTE: this is NOT the trip_stop_id (nor its "
+                "deprecated alias stop_id) from station_departures/"
+                "station_arrivals, whose value identifies one stop of one train "
+                "run (e.g. '-1203677609210685804-2607251113-13'); passing it "
+                "returns no_data with a corrective note instead of departures."
             )
         ),
     ] = None,
@@ -233,6 +271,25 @@ async def transit_departures(
                     "Provide a stop_id to get live departures. Discover valid stop "
                     "IDs for this city with get_city_resource(slug, "
                     "resource='transit'), then call again."
+                ),
+            },
+        }
+    if _TRIP_STOP_ID_RE.match(stop_id):
+        # Verwechslung mit der Trip-Halt-ID der Bahnhofstafeln: der Wert kann
+        # hier nie treffen, die Live-Route wuerde ihn mit 400 abweisen. Statt
+        # den Fehler zu erzeugen, dieselbe selbst-korrigierende Envelope wie bei
+        # fehlender stop_id liefern, nur mit dem konkreten Grund.
+        return {
+            "data": None,
+            "meta": {
+                "source_status": "no_data",
+                "note": (
+                    f"'{stop_id}' is a trip_stop_id from a station board "
+                    "(station_departures/station_arrivals): it identifies ONE "
+                    "STOP OF ONE TRAIN RUN, not a station. This tool needs a "
+                    "stop ID in the DELFI pattern 'de:<AGS>:<id>' or a numeric "
+                    "gtfs.de stop id. Get one from get_city_resource(slug, "
+                    "resource='transit') (field stop_id), then call again."
                 ),
             },
         }

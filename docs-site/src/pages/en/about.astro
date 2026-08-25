@@ -37,21 +37,30 @@ import Docs from "../../layouts/Docs.astro";
 
   <h2>How the project runs</h2>
   <p>
-    The entire project is free to use and ad-free. A source code release is in
-    preparation. It is built with accessibility in mind. Maintenance and
-    operation rest with a single person, namely me. Everything runs on a server
-    in Germany.
+    The entire project is free to use and ad-free. The source code is public on
+    GitHub (Apache-2.0). It is built with accessibility in mind. No registration
+    is required, so no account or user data is collected. I run everything on
+    servers in Germany, with a standby system in Finland for failover, both
+    within the EU.
   </p>
   <p>
-    To make up for that, I use every available technique for a self-healing
-    system: outages of individual sources are caught automatically and recover
-    on their own as soon as the source returns. And just in case, I am connected
-    directly via ntfy and always respond immediately.
+    To that end I use every available technique for a self-healing system:
+    outages of individual sources are caught automatically and recover on their
+    own as soon as the source returns. Monitoring watches the service around the
+    clock and raises an alert immediately if something goes wrong. Daily offsite
+    backups with a recovery that has been tested in practice, and an extensive
+    automated test suite before every deploy, keep changes reliable and
+    transparent.
   </p>
 
   <h2>Contact</h2>
   <p>
     For suggestions, bug reports and enquiries you can reach me at
-    <a href="mailto:admin@infranode.dev">admin@infranode.dev</a>.
+    <a href="mailto:admin@infranode.dev">admin@infranode.dev</a>. You can find
+    more of my work on
+    <a href="https://www.linkedin.com/in/khaled-cherif-infranode/" rel="me"
+      >LinkedIn</a
+    >
+    and <a href="https://github.com/street1983nk" rel="me">GitHub</a>.
   </p>
 </Docs>

@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import httpx
 
+from infranode.normalization.fields import post_code
+
 # Host hartkodiert (SSRF, T-05-08): der DB-API-Marketplace-Gateway, Produkt StaDa.
 _BASE = "https://apis.deutschebahn.com/db-api-marketplace/apis/station-data/v2/stations"
 # StaDa liefert bundesweit ~5400 Bahnhöfe; ein großzügiges Limit holt alle in
@@ -66,10 +68,20 @@ def _normalize(station: dict) -> dict | None:
         "eva": str(eva["number"]),
         "evas": all_evas,
         "name": station.get("name"),
+        # ``station_category`` ist die DB-Bahnhofskategorie 1-7 (1 = groesster
+        # Knoten) und damit eine ZAHL. Der frueher einzige Name ``category``
+        # traegt in allen anderen Datenarten ein Text-Label (Zuggattung,
+        # Badegewaesser-Einstufung, Indikator-Gruppe); die Namensgleichheit bei
+        # unterschiedlichem Typ war der letzte offene Punkt des Konsistenz-Audits
+        # 2026-07-25. ``category`` bleibt abgekuendigt mit identischem Wert.
+        "station_category": station.get("category"),
         "category": station.get("category"),
         "lat": lat,
         "lon": lon,
-        "zip": addr.get("zipcode"),
+        # Kanonischer Name (Konsistenz-Audit 2026-07-25), immer fuenfstellig;
+        # ``zip`` bleibt abgekuendigt mit identischem Wert stehen.
+        "post_code": post_code(addr.get("zipcode")),
+        "zip": post_code(addr.get("zipcode")),
         # Amtlicher Gemeindeschlüssel = Zuordnungsschlüssel zur Stadt (== ags).
         "ags": station.get("municipalityCode"),
     }

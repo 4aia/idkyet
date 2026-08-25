@@ -30,6 +30,10 @@ from infranode.normalization import (
     SourceId,
 )
 
+# Wert-Mapping fürs kanonische coverage_granularity (Abkündigung 2026-08-01):
+# eine Quelle der Wahrheit in payloads.py, hier nur importiert (kein Duplikat).
+from infranode.normalization.payloads import _ELECTION_COVERAGE_EN
+
 # DL-DE/BY 2.0 (Datenlizenz Deutschland, Namensnennung 2.0).
 _DL_DE_BY_URL = "https://www.govdata.de/dl-de/by-2-0"
 
@@ -83,7 +87,10 @@ def map_election(
         ),
         payload=ElectionResultPayload(
             election=raw.get("election"),
+            # granularity (deutsche Werte) ist abgekündigt; kanonisch ist
+            # coverage_granularity mit "city"/"partial" (Abkündigung 2026-08-01).
             granularity=granularity,
+            coverage_granularity=_ELECTION_COVERAGE_EN.get(granularity, granularity),
             area_name=raw.get("area_name"),
             # [VERIFIED 2026-06-10] kerg2-Wahlbeteiligung (Prozent-String mit
             # Dezimal-KOMMA): bei "teilweise" aus der Wählende-Zeile, bei "stadt"

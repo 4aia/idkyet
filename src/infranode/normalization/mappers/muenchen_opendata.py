@@ -31,6 +31,32 @@ from infranode.normalization import (
 
 _DL_DE_BY_URL = "https://www.govdata.de/dl-de/by-2-0"
 
+# Alter deutscher Event-Key -> kanonischer englischer Key (Abkündigung
+# 2026-08-01). Der Adapter dupliziert bereits beim Holen; der Backfill hier
+# schließt die Übergangslücke für Roh-Antworten aus dem Redis-Cache, die vor
+# dem Deploy entstanden sind und nur die deutschen Keys tragen (Muster
+# mappers/tree_cadastre.py). Gesetzt wird nur, wenn der neue Key fehlt.
+_CANONICAL_KEYS: dict[str, str] = {
+    "beschreibung": "description",
+    "art": "event_type",
+    "von": "start",
+    "bis": "end",
+    "strasse_hausnr": "street",
+    "betroffene_bereiche": "affected_areas",
+}
+
+
+def _backfill_events(events: list[dict]) -> list[dict]:
+    """Ergänzt fehlende kanonische Keys aus den abgekündigten deutschen Keys."""
+    result: list[dict] = []
+    for event in events:
+        item = dict(event)
+        for old, new in _CANONICAL_KEYS.items():
+            if new not in item and old in item:
+                item[new] = item[old]
+        result.append(item)
+    return result
+
 
 def map_muenchen_road_events(
     raw: dict,
@@ -42,7 +68,7 @@ def map_muenchen_road_events(
     """Bildet rohe Münchner Road-Events auf einen ``CanonicalRecord`` (Tier A) ab.
 
     Die ``events`` (Baustellen/Sperrungen, DATA-15) wandern unverändert in den
-    ``RoadEventPayload`` (``city_source="muenchen_baustellen"``). Der
+    ``RoadEventPayload`` (``city_source="muenchen_roadworks"``). Der
     ``retrieved_at``-Zeitstempel wird injiziert (keine Systemuhr im Mapper), damit
     das Ergebnis deterministisch bleibt. Die Join-Keys ``ags``/``wikidata_qid``
     werden aus dem Register durchgereicht (Default ``None``). Verkehrsereignisse
@@ -54,7 +80,7 @@ def map_muenchen_road_events(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.MUENCHEN_BAUSTELLEN,
+        source=SourceId.MUENCHEN_ROADWORKS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -64,8 +90,8 @@ def map_muenchen_road_events(
             license_url=_DL_DE_BY_URL,
         ),
         payload=RoadEventPayload(
-            city_source="muenchen_baustellen",
-            events=raw.get("events", []),
+            city_source="muenchen_roadworks",
+            events=_backfill_events(raw.get("events", [])),
         ),
     )
 
@@ -93,7 +119,7 @@ def map_muenchen_parking(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.MUENCHEN_PARKHAEUSER,
+        source=SourceId.MUENCHEN_PARKING,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

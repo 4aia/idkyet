@@ -16,6 +16,11 @@ dependencies = [
     "itsdangerous==2.2.0",
     "jinja2==3.1.6",
     "limits==5.8.0",
+    # maxminddb: reines Lese-Lib fuer DB-IP-Lite-mmdb-Dateien. Lokaler GeoIP/ASN-
+    # Lookup fuer den Admin-Traffic-Tab OHNE externen Dienst (keine Besucher-IP
+    # verlaesst den Server). Live-Dependency, da der Lookup im Admin-Request-Pfad
+    # laeuft.
+    "maxminddb==3.1.1",
     # openpyxl: liest die Berlin-Radzaehldaten-XLSX (DATA-40 bike-counts, einzige
     # XLSX-Quelle). read_only-Streaming, nur bei Cache-Miss (lange TTL).
     "openpyxl==3.1.5",
@@ -26,6 +31,11 @@ dependencies = [
     "redis==8.0.0",
     "slowapi==0.1.9",
     "structlog==26.1.0",
+    # tenacity: zentraler Retry/Backoff fuer idempotente Upstream-GETs im geteilten
+    # httpx-Transport (Quick-260709-huj). In CLAUDE.md/Stack als Resilienz-Lib
+    # vorgesehen; glaettet transiente Upstream-Aussetzer (Connect/Read-Timeout,
+    # 502/503/504) ohne Latenz gesunder Requests zu vervielfachen.
+    "tenacity==9.1.4",
     # tzdata: IANA-Zeitzonen fuer zoneinfo (DATA-34 DB-Timetables nutzt
     # Europe/Berlin fuer die lokale Bahnhofs-Stunde). Auf Linux-Docker oft via
     # System-tz vorhanden, auf Windows/slim-Images aber NICHT -> explizit pinnen,
@@ -54,10 +64,17 @@ dev = [
     # Test-Zeit, NIE im Live-Docker-Image. War bereits transitiv vorhanden, hier
     # explizit gepinnt, damit der Contract-Test verlaesslich laeuft.
     "jsonschema==4.26.0",
+    # pyright: statischer Typcheck (typeCheckingMode basic, siehe [tool.pyright]).
+    # Nur Dev/CI-Zeit, NIE im Live-Docker-Image. Exakt gepinnt, damit CI und lokal
+    # dieselben Diagnosen liefern (pyright aendert Regeln zwischen Patch-Releases).
+    "pyright==1.1.411",
     "pytest==9.0.3",
     "pytest-asyncio==1.4.0",
     "respx==0.23.1",
     "ruff==0.15.16",
+    # vulture: Dead-Code-Detektor (CI-Gate, --min-confidence 80). Nur Dev/CI-Zeit,
+    # NIE im Live-Docker-Image. Exakt gepinnt fuer deterministische CI-Ergebnisse.
+    "vulture==2.16",
 ]
 # Optionale Batch-Verarbeitungs-Schicht (D-01 pyarrow + D-17 h3).
 # Eigene Gruppe, NIE in [project] dependencies: beide duerfen nicht ins
@@ -85,9 +102,13 @@ ingest = [
 explorer = [
     "duckdb==1.5.3",
 ]
+osm = [
+    "osmium>=4.3.1",
+    "shapely>=2.1.2",
+]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "SIM", "C4", "RUF", "PT", "RET", "A", "ISC"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
@@ -96,6 +117,26 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
 # akzeptabel -> E501 ignorieren; alle uebrigen Regeln (F/B/I/S) bleiben aktiv,
 # damit echte Bugs (unbenutzte Importe, zip-strict) weiter gefangen werden.
 "scripts/**" = ["E501"]
+# Die vulture-Whitelist lebt vom Muster "nackter Name + Kommentar" (so markiert
+# vulture Namen als benutzt) -> useless-expression/undefined-name sind hier Absicht.
+".vulture_whitelist.py" = ["B018", "F821"]
+
+# Statischer Typcheck (CI-Gate neben ruff). Scope bewusst src/: Tests und
+# scripts/ bleiben draussen (viel Mock-/Fixture-Dynamik, eigener Aufwand).
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+# Die drei Ausnahmen sind optionale Offline-Batch-Schichten (pyarrow/h3/osmium,
+# eigene dependency-groups, NIE im Live-Docker-Image). Ihre Typisierung ist ein
+# eigenes spaeteres Projekt:
+# - export/shape.py: 1238 pyright-Fehler (pyarrow/h3-Dynamik)
+# - export/panel.py: 289 pyright-Fehler (pyarrow-Dynamik)
+# - ingest/osm_pois.py: 23 pyright-Fehler (braucht die optionale osm-Gruppe)
+exclude = [
+    "src/infranode/export/shape.py",
+    "src/infranode/export/panel.py",
+    "src/infranode/ingest/osm_pois.py",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

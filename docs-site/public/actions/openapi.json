@@ -3,7 +3,7 @@
  "info": {
   "title": "InfraNode, offene Stadtdaten Deutschland",
   "version": "1.0.0",
-  "description": "Kostenlose, keylose Open-Data-API fuer 84 deutsche Grossstaedte. Einstieg: getCities liefert alle Stadt-Slugs, getCityOverview(slug) liefert Stammdaten, den Katalog aller Datenarten mit Abdeckungsstatus und einen Live-Schnappschuss. Jede Antwort traegt data.attribution (Lizenz/Quelle, bei Nennung IMMER wiedergeben) und meta.source_status."
+  "description": "Kostenlose, keylose Open-Data-API fuer 84 deutsche Grossstaedte. Standardweg fuer die meisten Datenarten: getCityResource(slug, resource). getCities liefert alle Stadt-Slugs, getCityOverview(slug) den Katalog aller Datenarten mit Abdeckungsstatus."
  },
  "servers": [
   {
@@ -122,7 +122,7 @@
         "weather-warnings"
        ]
       },
-      "description": "Zu vergleichende Ressource; unbekannt -> 400 invalid_request. weather/air = Live-Adapter (DWD/UBA); indicators, demographics, unemployment, tourism, charging-status und weather-warnings delegieren an die jeweiligen Stadt-Endpunkte (identisches Verhalten inkl. Attribution). charging-status liefert im Compare nur die Aggregate (points_omitted statt Einzelpunkt-Liste).",
+      "description": "Zu vergleichende Ressource; unbekannt -> 400 invalid_request. weather/air = Live-Adapter (DWD/UBA); indicators, demographics, unemployment, tourism, charging-status und weather-warnings delegieren an die jeweiligen Stadt-Endpunkte (identisches Verhalten inkl. Attribution).",
       "x-description-en": "Resource to compare; unknown -> 400 invalid_request. weather/air = live adapters (DWD/UBA); indicators, demographics, unemployment, tourism, charging-status and weather-warnings delegate to the per-city endpoints (identical behaviour incl. attribution). charging-status returns aggregates only in compare (points_omitted instead of the point list)."
      },
      {
@@ -237,35 +237,6 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/air": {
-   "get": {
-    "operationId": "getCityAir",
-    "summary": "Luftqualität je Stadt (Umweltbundesamt)",
-    "description": "Aktuelle Luftqualitäts-Messwerte einer Stadt aus der Luftdaten-API des Umweltbundesamts im kanonischen Envelope. Die fünf Schadstoff-Messwerte (PM10, PM2.5, NO2, O3, SO2) stehen in data, Quelle und source_status in meta. Werte sind live (kein Zwischenbestand).",
-    "parameters": [
-     {
-      "name": "slug",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
-     },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
   "/api/v1/cities/{slug}/overview": {
    "get": {
     "operationId": "getCityOverview",
@@ -327,8 +298,8 @@
   "/api/v1/cities/{slug}/pois": {
    "get": {
     "operationId": "getCityPois",
-    "summary": "POIs je Stadt, nach Typ gefiltert (OSM/Overpass, Tier B)",
-    "description": "Liefert POIs einer Stadt aus OpenStreetMap (über Overpass) im kanonischen Envelope, gefiltert nach dem Query-Parameter type. Der Typ wird gegen eine feste Liste geprüft; ein unbekannter Typ löst 422 aus (kein roher Input in die Overpass-Query). Tier B (copyleft).",
+    "summary": "POIs je Stadt, nach Typ gefiltert (OSM, Tier B)",
+    "description": "Liefert POIs einer Stadt aus OpenStreetMap im kanonischen Envelope, gefiltert nach dem Query-Parameter type. Der Typ wird gegen eine feste Liste geprüft; ein unbekannter Typ löst 422 aus.",
     "parameters": [
      {
       "name": "slug",
@@ -346,7 +317,8 @@
       "description": "POI-Typ aus der erlaubten Liste (z.B. hospital, school, pharmacy).",
       "x-description-en": "POI type from the allowed list (e.g. hospital, school, pharmacy).",
       "schema": {
-       "type": "string"
+       "type": "string",
+       "example": "hospital"
       }
      }
     ],
@@ -363,11 +335,11 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/traffic": {
+  "/api/v1/cities/{slug}/transit": {
    "get": {
-    "operationId": "getCityTraffic",
-    "summary": "Baustellen und Verkehrsmeldungen je Stadt (Autobahn-API)",
-    "description": "Baustellen (roadworks) und Verkehrswarnungen (warnings) im Umfeld einer Stadt aus der Autobahn-API im kanonischen Envelope. Die Meldungen werden per Bounding-Box um die Stadt-Koordinaten gefiltert, data enthält die passenden Einträge.",
+    "operationId": "getCityTransit",
+    "summary": "ÖPNV-Haltestellen je Stadt (DELFI und HVV GTFS)",
+    "description": "Normalisierte ÖPNV-Haltestellen einer Stadt aus dem bundesweiten DELFI-GTFS-Feed bzw. dem HVV-Feed im kanonischen Envelope. Die Daten werden offline aufbereitet und als Snapshot je Stadt gehalten, sodass der Abruf schnell antwortet, ohne den Feed pro Request zu parsen.",
     "parameters": [
      {
       "name": "slug",
@@ -377,267 +349,57 @@
        "type": "string"
       },
       "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
      },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/charging": {
-   "get": {
-    "operationId": "getCityCharging",
-    "summary": "E-Ladesäulen-Standorte je Stadt (BNetzA, Tier A)",
-    "description": "Liefert die E-Ladesäulen-Standorte einer Stadt (nur Stammdaten, KEINE Belegung) aus dem BNetzA-Ladesäulenregister im kanonischen Envelope.",
-    "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "Case-insensitiver Substring-Filter auf den Haltestellennamen (stop_name), z.B. alsterdorf.",
+      "x-description-en": "Case-insensitive substring filter on the stop name (stop_name), e.g. alsterdorf.",
       "schema": {
        "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+      }
      },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/charging-status": {
-   "get": {
-    "operationId": "getCityChargingStatus",
-    "summary": "Live-Ladesäulen-Belegung je Stadt (eRound, CC0/Tier A)",
-    "description": "Liefert die aggregierte Live-Ladesäulen-Belegung einer Stadt (eRound AFIR-Recharging, DATEX-II V3, CC0) im kanonischen Envelope.",
-    "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "near",
+      "in": "query",
+      "required": false,
+      "description": "\"lat,lon\"; liefert nur Haltestellen im Umkreis, aufsteigend nach Distanz sortiert. Ungültige Werte -> 400.",
+      "x-description-en": "\"lat,lon\"; returns only stops within the radius, sorted by distance ascending. Invalid values -> 400.",
       "schema": {
        "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+      }
      },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/water-level": {
-   "get": {
-    "operationId": "getCityWaterLevel",
-    "summary": "Pegelstand je Stadt (PEGELONLINE, Tier A, Teilabdeckung)",
-    "description": "Liefert den aktuellen Pegelstand der nächstgelegenen Station einer Stadt aus PEGELONLINE im kanonischen Envelope. Teilabdeckung: nur Städte an Bundeswasserstraßen haben eine Station, sonst kommt 200 mit source_status=\"no_data\" (kein 5xx). Tier A. Deaktiviert -> 200 source_status=\"disabled\".",
-    "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "radius_m",
+      "in": "query",
+      "required": false,
+      "description": "Suchradius für near in Metern (Default 1000).",
+      "x-description-en": "Search radius for near in metres (default 1000).",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+       "type": "integer",
+       "default": 1000
+      }
      },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/flood": {
-   "get": {
-    "operationId": "getCityFlood",
-    "summary": "Hochwasser-Warnstufen je Stadt (LHP, Tier A)",
-    "description": "Liefert die aktuellen Hochwasser-Warnstufen der kuratierten Pegel einer Stadt aus dem Länderübergreifenden Hochwasserportal (LHP) im kanonischen Envelope. Die Attribution trägt den \"Stand:\"-Zeitstempel (Pflicht). Tier A.",
-    "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "description": "Seitennummer der Default-Paginierung ohne q/near (Default 50 Einträge, Cap 200); meta.pagination weist total/returned/limit/offset/truncated aus.",
+      "x-description-en": "Page number of the default pagination without q/near (default 50 entries, cap 200); meta.pagination reports total/returned/limit/offset/truncated.",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+       "type": "integer"
+      }
      },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/pollen-uv": {
-   "get": {
-    "operationId": "getCityPollenUv",
-    "summary": "Pollenflug und UV-Index je Stadt (DWD opendata, Tier A)",
-    "description": "Liefert Pollenflug-Gefahrenindex und UV-Index für die Großregion einer Stadt aus DWD opendata im kanonischen Envelope. Die Daten sind nach DWD-Großregionen gegliedert, NICHT stadtgenau (region_name im Payload). Attribution mit modified=true (GeoNutzV). Tier A.",
-    "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "Einträge pro Seite der Default-Paginierung ohne q/near (Default 50, Cap 200).",
+      "x-description-en": "Entries per page of the default pagination without q/near (default 50, cap 200).",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
-     },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/demographics": {
-   "get": {
-    "operationId": "getCityDemographics",
-    "summary": "Demografie-Zeitreihen je Stadt (GENESIS/Regionalstatistik, Tier A)",
-    "description": "Liefert Demografie-Stammwerte und Zeitreihen einer Stadt aus der POST-API der GENESIS-/Regionalstatistik im kanonischen Envelope. Der Zugang ist account-gebunden: ohne hinterlegte Zugangsdaten oder bei deaktivierter Quelle antwortet der Endpunkt mit 200 source_status=\"disabled\". Tier A.",
-    "parameters": [
-     {
-      "name": "slug",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
-     },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/power-price": {
-   "get": {
-    "operationId": "getCityPowerPrice",
-    "summary": "Day-ahead-Börsenstrompreis bundesweit (SMARD, Tier A)",
-    "description": "Day-ahead-Großhandelspreis der Gebotszone DE/LU als Tageswert in EUR/MWh (bundesweit, für alle Städte identisch). Quelle: Bundesnetzagentur | SMARD.de (CC BY 4.0). Deaktiviert -> 200 source_status=\"disabled\".",
-    "parameters": [
-     {
-      "name": "slug",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
-     },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/weather-warnings": {
-   "get": {
-    "operationId": "getCityWeatherWarnings",
-    "summary": "Amtliche DWD-Wetterwarnungen je Stadt (Tier A)",
-    "description": "Aktive amtliche Wetterwarnungen des Deutschen Wetterdienstes für die Stadt (Filterung über die Gemeinde-Warncell = \"1\"+AGS). Liefert max_level (0 = keine reguläre Warnung, 1-4 = DWD-Warnstufe), count und die Einzelwarnungen.",
-    "parameters": [
-     {
-      "name": "slug",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
-     }
-    ],
-    "responses": {
-     "200": {
-      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
-     },
-     "404": {
-      "description": "Unbekannte Stadt oder Ressource."
-     },
-     "429": {
-      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
-     }
-    }
-   }
-  },
-  "/api/v1/cities/{slug}/fuel-prices": {
-   "get": {
-    "operationId": "getCityFuelPrices",
-    "summary": "Aktuelle Spritpreise je Stadt, aggregiert (Tankerkönig/MTS-K, Tier A)",
-    "description": "Aktuelle Spritpreise im Umkreis der Stadtkoordinate, aggregiert zu einer Stadt-Kennzahl: Durchschnitts- und Minimal-Preis je Sorte (e5/e10/diesel, EUR/Liter) über die geöffneten Tankstellen, plus station_count/open_count und die Einzel-Tankstellen.",
-    "parameters": [
-     {
-      "name": "slug",
-      "in": "path",
-      "required": true,
-      "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+       "type": "integer"
+      }
      }
     ],
     "responses": {
@@ -657,7 +419,7 @@
    "get": {
     "operationId": "getCityStationDepartures",
     "summary": "Live-Abfahrtstafel Haupt-Bahnhof der Stadt, alle Gattungen (DB Timetables, Tier A)",
-    "description": "Nächste Zugabfahrten am Haupt-Bahnhof der Stadt mit Echtzeit-Verspätung: Sollfahrplan (/plan) und aktuelle Abweichungen (/fchg) der DB-Timetables-API, je Bahnhof zu einer nach Abfahrt sortierten Liste zusammengeführt (line, category, destination, planned_time, platform, delay_minutes, cancelled,...",
+    "description": "Nächste Zugabfahrten am Haupt-Bahnhof der Stadt mit Echtzeit-Verspätung: Sollfahrplan (/plan) und aktuelle Abweichungen (/fchg) der DB-Timetables-API, je Bahnhof zu einer nach Abfahrt sortierten Liste zusammengeführt (line, category, destination, planned_time mit Zeitzone, platform...",
     "parameters": [
      {
       "name": "slug",
@@ -682,20 +444,22 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/indicators": {
+  "/api/v1/stations/{eva}/departures": {
    "get": {
-    "operationId": "getCityIndicators",
-    "summary": "Sozialökonomische Indikatoren je Stadt (INKAR/BBSR, Tier A)",
-    "description": "Kuratiertes, breites Set sozialökonomischer Indikatoren je Kreis/ kreisfreie Stadt (Arbeitsmarkt, Wirtschaft, Einkommen, Demografie, Wohnen, Erreichbarkeit, Verkehr, Bildung, Gesundheit, Fläche), aus der offenen INKAR-Wizard-API des BBSR. Je Indikator der jüngste Jahreswert mit Bezeichnung (inkl.",
+    "operationId": "getStationDepartures",
+    "summary": "Live-Abfahrten eines beliebigen Bahnhofs per EVA, alle Gattungen (DB Timetables, Tier A)",
+    "description": "Live-Abfahrtstafel JEDES DB-Bahnhofs über seine EVA-Nummer (aus GET /cities/{slug}/stations), inkl. Nahverkehr (alle Gattungen ICE/IC/RE/RB/S), Echtzeit-Verspätung und Störungen/Meldungen (messages je Eintrag). Quelle: Deutsche Bahn AG (CC BY 4.0).",
     "parameters": [
      {
-      "name": "slug",
+      "name": "eva",
       "in": "path",
       "required": true,
+      "description": "EVA-Nummer des Bahnhofs (6-8-stellige Zahl).",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+       "type": "string",
+       "pattern": "^[0-9]{6,8}$",
+       "example": "8000105"
+      }
      }
     ],
     "responses": {
@@ -711,20 +475,21 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/parking": {
+  "/api/v1/live/hamburg/departures": {
    "get": {
-    "operationId": "getCityParking",
-    "summary": "Parkhaus-Belegung/-Katalog je Stadt (EIN Endpunkt mit Quellen-Fallback)",
-    "description": "Parkhaus-Daten je Stadt aus EINEM Endpunkt mit Quellen-Fallback (Dedup): bevorzugt ParkenDD-Live-Belegung (frei/gesamt je Parkhaus, 13 Städte mit verifiziert offener Lizenz, keylos), für München der statische Open-Data-Standortkatalog (DL-DE/BY 2.0, ohne Live-Belegung), für Frankfurt am Main, Wup...",
+    "operationId": "getLiveHamburgDepartures",
+    "summary": "Live-ÖPNV-Abfahrten Hamburg je Station (HVV-Geofox-GTI)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel einer HVV-Station aus der HVV-Geofox-GTI-API: je Abfahrt Linie, Richtung, Soll-Offset in Minuten, Verspätung in Sekunden und Linien-Störungshinweise. Stadt fix hamburg (Geofox deckt nur den HVV-Raum ab).",
     "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "station",
+      "in": "query",
+      "required": false,
+      "description": "HVV-Stationsname (Default \"Hamburg Hauptbahnhof\").",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+       "type": "string",
+       "default": "Hamburg Hauptbahnhof"
+      }
      }
     ],
     "responses": {
@@ -740,20 +505,21 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/road-events": {
+  "/api/v1/live/nuernberg/departures": {
    "get": {
-    "operationId": "getCityRoadEvents",
-    "summary": "Innerstädtische Baustellen und Sperrungen je Stadt (Tier A)",
-    "description": "Liefert innerstädtische Baustellen und Sperrungen einer Stadt aus den schlüssellosen Pro-Stadt-Quellen (Berlin VIZ, Hamburg, Köln, München, MobiData BW, Dortmund) im kanonischen Envelope.",
+    "operationId": "getLiveNuernbergDepartures",
+    "summary": "Live-ÖPNV-Abfahrten Nürnberg je Halt (VGN/VAG, keylos, Tier A)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel eines VGN-Halts aus der offenen, keylosen VAG-Puls-API (start.vag.de): je Abfahrt Linie, Richtung, Soll-Offset in Minuten, Verspätung in Sekunden und Produkt. Stadt fix nuernberg (VGN-Raum).",
     "parameters": [
      {
-      "name": "slug",
-      "in": "path",
-      "required": true,
+      "name": "stop_id",
+      "in": "query",
+      "required": false,
+      "description": "Numerische VGN-Halt-ID (VGNKennung), Default \"510\" (Nürnberg Hbf).",
       "schema": {
-       "type": "string"
-      },
-      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+       "type": "string",
+       "default": "510"
+      }
      }
     ],
     "responses": {
@@ -769,20 +535,200 @@
     }
    }
   },
-  "/api/v1/cities/{slug}/events": {
+  "/api/v1/live/{slug}/departures": {
    "get": {
-    "operationId": "getCityEvents",
-    "summary": "Veranstaltungen je Stadt (destination.one)",
-    "description": "Aktuelle und kommende Veranstaltungen einer Stadt aus der account-gebundenen Quelle destination.one/eT4.META im kanonischen Envelope. Die Lizenz wird je Datensatz aus dem Lizenzfeld abgeleitet (CC0/CC-BY, CC-BY-SA, sonst unbekannt) und in attribution gespiegelt.",
+    "operationId": "getLiveVrrDepartures",
+    "summary": "Live-ÖPNV-Abfahrten der VRR-Kernstädte + VVS Stuttgart je Station (Mentz-EFA, Tier C)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel einer Station in einer der sechs VRR-Kernstädte (duesseldorf, dortmund, essen, duisburg, bochum, wuppertal, keylose Mentz-EFA efa.vrr.de) oder in Stuttgart (VVS, keylose Mentz-EFA www3.vvs.de): je Abfahrt Linie, Richtung, Minuten bis zur Abfahrt und Verspätung...",
     "parameters": [
      {
       "name": "slug",
       "in": "path",
       "required": true,
+      "description": "EFA-Verbund-Stadt-Slug: VRR-Kernstädte (duesseldorf, dortmund, essen, duisburg, bochum, wuppertal) oder VVS Stuttgart (stuttgart). Andere Städte liefern 404.",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "duesseldorf",
+        "dortmund",
+        "essen",
+        "duisburg",
+        "bochum",
+        "wuppertal",
+        "stuttgart"
+       ]
+      }
+     },
+     {
+      "name": "station",
+      "in": "query",
+      "required": false,
+      "description": "Stationsname (Default Hauptbahnhof der Stadt).",
       "schema": {
        "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/{city}/transit/departures": {
+   "get": {
+    "operationId": "getLiveTransitDepartures",
+    "summary": "Live-ÖPNV-Abfahrten je Halt mit Verspätung (GTFS-RT, Tier B)",
+    "description": "Liefert die Live-Abfahrten eines Halts mit aktueller Verspätung aus dem GTFS-RT-Feed (gtfs.de bzw. Mobilithek-DELFI, CC-BY-SA = Tier B) im Live-Envelope (meta mit as_of und refresh_seconds=45, dem Poller-Takt).",
+    "parameters": [
+     {
+      "name": "city",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "berlin"
       },
       "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     },
+     {
+      "name": "stop_id",
+      "in": "query",
+      "required": true,
+      "description": "DELFI-Halt-ID im Muster de:<AGS>:<id> (gegen eine Allowlist geprüft). Gültige IDs je Stadt liefert GET /api/v1/cities/{slug}/transit im Feld stop_id. NICHT die trip_stop_id der Bahnhofstafeln, die bezeichnet einen Halt einer Zugfahrt.",
+      "x-description-en": "DELFI stop ID in the pattern de:<AGS>:<id> (checked against an allowlist). Valid ids per city come from GET /api/v1/cities/{slug}/transit, field stop_id. NOT the trip_stop_id of the station boards, which denotes one stop of one train run.",
+      "schema": {
+       "type": "string",
+       "example": "de:11000:900003101::6"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/{resource}": {
+   "get": {
+    "operationId": "getCityResource",
+    "summary": "Beliebige Datenart einer Stadt abrufen (generisch)",
+    "description": "Liefert jede Datenart einer Stadt im kanonischen Envelope {data, meta}. meta.source_status zeigt ok/no_data/not_covered/disabled. data.attribution (Lizenz/Quelle) bei Nennung immer wiedergeben.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404.",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "resource",
+      "in": "path",
+      "required": true,
+      "description": "Data type key, e.g. air, parking, charging, demographics, events, road-events, fuel-prices, solar. Full per-city catalog with coverage status: getCityOverview(slug).",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "accidents",
+        "air",
+        "air-uba",
+        "base",
+        "bathing-water",
+        "bike-counts",
+        "bike-parking",
+        "business-registrations",
+        "care",
+        "charging",
+        "charging-status",
+        "childcare",
+        "civil-protection-warnings",
+        "construction",
+        "council-papers",
+        "crime-stats",
+        "demographics",
+        "district-heating",
+        "drinking-water",
+        "education",
+        "education-stats",
+        "election",
+        "energy",
+        "events",
+        "fire-danger",
+        "flood",
+        "fuel-prices",
+        "geo",
+        "government-offices",
+        "health",
+        "heritage",
+        "holidays",
+        "hospitals-atlas",
+        "indicators",
+        "insolvencies",
+        "integration",
+        "labour-market",
+        "land-values",
+        "markets",
+        "mobility-points",
+        "municipal-finance",
+        "office-wait-times",
+        "overview",
+        "parcel-lockers",
+        "park-and-ride",
+        "parking",
+        "parking-onstreet",
+        "playgrounds",
+        "pollen-uv",
+        "population-density",
+        "population-structure",
+        "population-trend",
+        "post-boxes",
+        "post-offices",
+        "power-load",
+        "power-price",
+        "public-tenders",
+        "public-toilets",
+        "public-wifi",
+        "recycling-centres",
+        "road-events",
+        "sharing",
+        "social-situation",
+        "solar",
+        "solar-roofs",
+        "station-arrivals",
+        "station-departures",
+        "station-facilities",
+        "stations",
+        "sustainability",
+        "tax-rates",
+        "tourism",
+        "traffic",
+        "transit",
+        "tree-cadastre",
+        "unemployment",
+        "vehicle-registrations",
+        "water-level",
+        "weather",
+        "weather-warnings",
+        "webcams"
+       ]
+      }
      }
     ],
     "responses": {

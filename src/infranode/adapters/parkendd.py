@@ -23,9 +23,55 @@ ON-ERROR der Fassade); jeder Feldzugriff defensiv per ``.get()`` mit None-Fallba
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
+import structlog
+
+log = structlog.get_logger()
 
 _BASE = "https://api.parkendd.de"
+
+# Staleness-Guard (Owner-Entscheidung (b), 2026-07-07): 8 der 13 ParkenDD-Städte
+# sind beim Upstream EINGEFROREN (last_updated koeln 2021-09, heilbronn 2022-09,
+# dortmund/ulm 2023-12, oldenburg 2024-02, heidelberg 2024-08, muenster 2024-11,
+# hamburg 2025-03; nur aachen/dresden/freiburg/kaiserslautern/karlsruhe live).
+# Eine Live-Belegung, deren Datenstand aelter als dieses Fenster ist, ist keine
+# Belegungsauskunft mehr -> der Fetch leert ``facilities`` und der bestehende
+# ehrliche no_data-Pfad der Route greift. Selbstheilend: liefert der Ursprung
+# wieder, faellt die Stadt automatisch auf ok zurueck. 48 h statt Stunden, damit
+# kurze Upstream-Wartungen nicht flappen; die eingefrorenen Staedte liegen um
+# GROESSENORDNUNGEN darueber. Live-Zellen je Stadt siehe expected_matrix-Pflege.
+_MAX_AS_OF_AGE = timedelta(hours=48)
+
+
+def _is_frozen(as_of: object, *, now: datetime | None = None) -> bool:
+    """True, wenn der ParkenDD-Datenstand aelter als ``_MAX_AS_OF_AGE`` ist.
+
+    Defensiv: fehlender oder unparsbarer ``last_updated``-String gilt NICHT als
+    eingefroren (kein falsches no_data aus einem Formatwechsel; die Frische ist
+    dann schlicht unbekannt). ParkenDD liefert naive Zeitstempel; sie werden als
+    UTC interpretiert (moegliche Lokalzeit-Abweichung von 1-2 h ist gegen das
+    48-h-Fenster irrelevant).
+    """
+    if not isinstance(as_of, str) or not as_of:
+        return False
+    try:
+        parsed = datetime.fromisoformat(as_of)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return (now or datetime.now(UTC)) - parsed > _MAX_AS_OF_AGE
+
+
+# ParkenDD antwortet seit ~2026-07 traege (gemessen 2026-07-07 von der Box:
+# 1,6-4,2s TTFB, Spitzen darueber). Der konservative 5s-Client-Default
+# (infra/http.py) reisst dann intermittierend -> ReadTimeout -> Breaker oeffnet
+# -> ALLE ParkenDD-Staedte upstream_unavailable. Hier explizit pro Request
+# ueberschrieben (T-03-03, Overpass-Muster), ohne den Default fuer schnelle
+# Quellen zu lockern.
+_PARKENDD_TIMEOUT = httpx.Timeout(connect=2.0, read=15.0, write=5.0, pool=1.0)
 
 # InfraNode-Slug -> ParkenDD-Stadt-ID (Pfadsegment). NUR die 13 Städte, deren
 # Parkdaten-Ursprung eine OFFENE Standardlizenz führt (Lizenz-Recherche je Ursprung
@@ -73,14 +119,23 @@ async def fetch_parkendd(
 
     Rückgabe-Keys (exakt das, was ``map_parkendd`` erwartet): ``slug``,
     ``facilities`` und ``as_of`` (Datenstand ISO-String oder None).
+
+    Staleness-Guard: ist ``last_updated`` aelter als ``_MAX_AS_OF_AGE``
+    (eingefrorener Upstream, siehe Modul-Kommentar), kommt ``facilities=[]``
+    zurueck -> die Route liefert ehrlich ``no_data`` statt einer Jahre alten
+    "Live"-Belegung. ``as_of`` bleibt zur Diagnose erhalten.
     """
     city_id = PARKENDD_CITIES[slug]
-    resp = await http.get(f"{_BASE}/{city_id}")
+    resp = await http.get(f"{_BASE}/{city_id}", timeout=_PARKENDD_TIMEOUT)
     resp.raise_for_status()
 
     body = resp.json()
     lots = body.get("lots", []) if isinstance(body, dict) else []
     as_of = body.get("last_updated") if isinstance(body, dict) else None
+
+    if _is_frozen(as_of):
+        log.info("parkendd_frozen_upstream", slug=slug, as_of=as_of)
+        return {"slug": slug, "facilities": [], "as_of": as_of}
 
     facilities: list[dict] = []
     for lot in lots:
@@ -98,19 +153,19 @@ async def fetch_parkendd(
         state = lot.get("state")
         free = lot.get("free")
         total = lot.get("total")
-        if (isinstance(free, (int, float)) and free < 0) or state in {
-            "nodata",
-            "closed",
-        }:
-            free = None
-        # MITTEL-Fix (Audit 2026-06-29): free > total ist physikalisch unmöglich
-        # (Live Köln Philharmonie free:252/total:247 = Sensor-Drift) -> unplausibel,
-        # keine erfundene Belegung ausliefern. Nur bei echter Kapazität (total>0).
-        elif (
-            isinstance(free, (int, float))
-            and isinstance(total, (int, float))
-            and total > 0
-            and free > total
+        if (
+            (isinstance(free, (int, float)) and free < 0)
+            or state
+            in {
+                "nodata",
+                "closed",
+            }
+            or (
+                isinstance(free, (int, float))
+                and isinstance(total, (int, float))
+                and total > 0
+                and free > total
+            )
         ):
             free = None
         facilities.append(

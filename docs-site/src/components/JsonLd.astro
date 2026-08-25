@@ -15,7 +15,8 @@ interface Props {
     | "SoftwareApplication"
     | "Dataset"
     | "Organization"
-    | "WebSite";
+    | "WebSite"
+    | "ItemList";
   // APIReference / SoftwareApplication / Dataset
   name?: string;
   abstract?: string;
@@ -38,6 +39,8 @@ interface Props {
   // distribution[]: je Bezugsquelle eine DataDownload (contentUrl + Format).
   distributions?: { url: string; format: string; name?: string }[];
   sameAs?: string[];
+  // ItemList: geordnete Liste von SoftwareApplication-Items (z.B. GPT-Store-GPTs).
+  items?: { name: string; url: string; description: string }[];
 }
 
 const {
@@ -58,6 +61,7 @@ const {
   creatorName,
   distributions,
   sameAs,
+  items,
 } = Astro.props;
 
 const site = Astro.site?.toString().replace(/\/$/, "") ?? "";
@@ -114,16 +118,16 @@ if (type === "WebAPI") {
     },
   };
 } else if (type === "Organization") {
-  // Marken-Entitaet mit stabiler @id, damit DE- und EN-Startseite dieselbe
+  // Marken-Entität mit stabiler @id, damit DE- und EN-Startseite dieselbe
   // Organisation referenzieren. sameAs = autoritative Profile (GitHub-Repo,
-  // PulseMCP-Listing) zur Entitaets-Disambiguierung gegen fremde Namensvettern
+  // PulseMCP-Listing) zur Entitäts-Disambiguierung gegen fremde Namensvettern
   // ("InfraNodus" / infranode.eu), GEO/Knowledge-Graph-Signal.
   data = {
     "@context": "https://schema.org",
     "@type": "Organization",
     "@id": `${site}/#organization`,
     name: name ?? "InfraNode",
-    // alternateName + disambiguatingDescription schaerfen die Marken-Entitaet
+    // alternateName + disambiguatingDescription schärfen die Marken-Entität
     // gegen gleichnamige Dritte (InfraNodus = Knowledge-Graph-Tool, Infranode =
     // Infrastruktur-Investor infranode.eu), damit KI-Antwortmaschinen und der
     // Knowledge-Graph infranode.dev korrekt zuordnen.
@@ -143,11 +147,11 @@ if (type === "WebAPI") {
     ],
   };
 } else if (type === "WebSite") {
-  // WebSite-Entitaet mit stabiler @id, verweist als publisher auf die
-  // Organization (#organization). Traegt die Marke + alternateName in den
+  // WebSite-Entität mit stabiler @id, verweist als publisher auf die
+  // Organization (#organization). Trägt die Marke + alternateName in den
   // Knowledge-Graph (Brand-Disambiguierung, siehe Organization). Bewusst OHNE
-  // potentialAction/SearchAction: die Doku-Suche (Pagefind) laeuft rein
-  // clientseitig ohne Such-URL, ein SearchAction-Target waere unehrlich/ungueltig.
+  // potentialAction/SearchAction: die Doku-Suche (Pagefind) läuft rein
+  // clientseitig ohne Such-URL, ein SearchAction-Target wäre unehrlich/ungültig.
   data = {
     "@context": "https://schema.org",
     "@type": "WebSite",
@@ -208,6 +212,36 @@ if (type === "WebAPI") {
           })),
         }
       : {}),
+  };
+} else if (type === "ItemList") {
+  // Geordnete Liste (z.B. die InfraNode-GPTs im ChatGPT Store). Jedes Item ist
+  // eine SoftwareApplication (kostenlos, DeveloperApplication), damit KI-
+  // Antwortmaschinen und Rich Results die einzelnen GPTs als eigenständige
+  // Anwendungen erfassen.
+  data = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: (items ?? []).map((it, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      item: {
+        "@type": "SoftwareApplication",
+        name: it.name,
+        description: it.description,
+        url: it.url,
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "Any",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "EUR",
+        },
+        provider: {
+          "@type": "Organization",
+          name: "InfraNode",
+        },
+      },
+    })),
   };
 } else {
   data = {

@@ -75,3 +75,16 @@ volumes:
   infranode_data:
   # Kuma-Daten (Monitore + Settings) persistent, ohne Docker-Socket.
   kuma_data:
+
+# dev/prod-Paritaet fuer Outbound-IPv6 (quick-260716-jlg): explizites default-Netz
+# mit NAT66-Egress wie in deploy/docker-compose.prod.yml, aber eigenem ULA-Subnetz
+# (BEWUSST verschieden von prod: Docker verlangt pro Host eindeutige Subnetze,
+# prod- und dev-Stack duerfen kollisionsfrei nebeneinander existieren). Auf Hosts
+# ohne globales IPv6 harmlos: der Container-v6-Connect schlaegt sofort fehl,
+# Happy Eyeballs/Fallback nimmt IPv4.
+networks:
+  default:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd0a:1e6f:6e0e::/64

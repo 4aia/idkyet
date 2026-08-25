@@ -1,6 +1,6 @@
 """Reiner Koeln-Behoerden-Wartezeiten-Mapper (Quick-260705-jgt, Tier A).
 
-Uebersetzt das rohe Adapter-dict aus ``adapters/koeln_wartezeiten.py``
+Uebersetzt das rohe Adapter-dict aus ``adapters/koeln_wait_times.py``
 deterministisch in einen ``CanonicalRecord`` mit ``OfficeWaitTimesPayload``.
 
 Schablone ist ``mappers/mobilithek_parken.map_dortmund_parking``: rein (kein HTTP,
@@ -85,7 +85,7 @@ def _office(item: dict) -> dict:
     }
 
 
-def map_koeln_wartezeiten(
+def map_koeln_wait_times(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -116,7 +116,7 @@ def map_koeln_wartezeiten(
         geo=None,
         observed_at=latest,
         retrieved_at=retrieved_at,
-        source=SourceId.KOELN_WARTEZEITEN,
+        source=SourceId.KOELN_WAIT_TIMES,
         license_id=LicenseId.DL_DE_ZERO_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

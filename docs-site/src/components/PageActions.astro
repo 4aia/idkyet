@@ -155,16 +155,16 @@ const chatgptUrl = `https://chatgpt.com/?q=${encodeURIComponent(fullPrompt)}`;
     font: inherit;
     font-size: 0.85rem;
     line-height: 1.2;
-    color: #1f2933;
-    background: #ffffff;
-    border: 1px solid #f0f0f0;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow);
     cursor: pointer;
     text-decoration: none;
   }
   .page-actions__btn:hover {
-    border-color: #d9dde2;
+    border-color: var(--border-strong);
   }
   .page-actions__icon {
     flex: 0 0 auto;

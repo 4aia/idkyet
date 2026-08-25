@@ -17,18 +17,29 @@ from dataclasses import dataclass
 from fastapi import Query
 
 from infranode.api.errors import ValidationFailedError
+from infranode.infra.gpt_actions import is_gpt_action
 
 # Defaults + harte Obergrenze für das Seiten-Limit (Cap via Query(le=MAX_LIMIT)).
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 
+# Truthy-Werte fuer den kanalunabhaengigen Vollausgabe-Schalter ``?all=...``.
+_TRUTHY_VALUES = frozenset({"1", "true", "yes"})
+
 
 @dataclass
 class PageParams:
-    """Validierte Paginierungs-Parameter eines Listen-GETs."""
+    """Validierte Paginierungs-Parameter eines Listen-GETs.
+
+    ``limit`` ist ``int | None``: ``None`` bedeutet "unbounded / Vollausgabe"
+    (kein oberes Seiten-Limit, nur ``offset`` wirkt). Das ist der kanal-abhaengige
+    Default fuer direktes REST (kein Breaking Change fuer Bulk-Nutzer) sowie das
+    Ergebnis des ``limit=all``/``?all=1``-Overrides; ein gebundener Kanal
+    (GPT-Actions/MCP) bzw. ein explizites numerisches limit traegt hier ein ``int``.
+    """
 
     page: int
-    limit: int
+    limit: int | None
     offset: int
     sort: str | None
     order: str
@@ -66,6 +77,11 @@ def paginate(items: list, p: PageParams, *, sort_whitelist: set[str]) -> list:
             f"Unbekanntes sort-Feld '{p.sort}'.",
             hint=f"Erlaubt: {', '.join(sorted(sort_whitelist))}.",
         )
+    if p.limit is None:
+        # Vollausgabe (REST-Default / limit=all): nur ab offset schneiden, kein
+        # oberes Limit; ``(page - 1) * None`` waere ein Typfehler, daher hier nur
+        # ``offset`` als Startpunkt (page ist bei Vollausgabe bedeutungslos).
+        return items[p.offset :]
     start = p.offset if p.offset else (p.page - 1) * p.limit
     return items[start : start + p.limit]
 
@@ -95,16 +111,43 @@ def _parse_int_param(raw: str | None, *, name: str, minimum: int, default: int) 
     return value
 
 
+def _is_full_output_override(qp) -> bool:
+    """True bei kanalunabhaengigem Vollausgabe-Override ``limit=all`` ODER ``all``.
+
+    ``limit=all`` (case-insensitive, getrimmt) ist der self-documenting
+    Escape-Hatch; ``?all=1``/``?all=true``/``?all=yes`` ist das aequivalente
+    Flag. Beide erzwingen die Vollausgabe (limit ``None``) AUCH auf den gebundenen
+    Kanaelen (GPT-Actions), der Override schlaegt also die Kanal-Erkennung.
+    """
+    limit_raw = qp.get("limit")
+    if limit_raw is not None and limit_raw.strip().lower() == "all":
+        return True
+    all_raw = qp.get("all")
+    return all_raw is not None and all_raw.strip().lower() in _TRUTHY_VALUES
+
+
 def parse_page_params(request, *, default_limit: int = DEFAULT_LIMIT) -> PageParams:
-    """Parst limit/offset (und page) aus ``request.query_params`` (ohne Depends).
+    """Parst limit/offset/all (und page) aus ``request.query_params`` (ohne Depends).
 
     Gegenstueck zu ``page_params`` fuer Routen/Helper, in denen kein FastAPI-
     ``Depends`` greift (z.B. der geteilte OSM-Helper und die Store-Routen, die die
-    Query selbst lesen). Spiegelt die Validierung von ``page_params``:
-    ``limit`` >= 1 (Default ``default_limit``, pro Endpunkt konfigurierbar),
-    ``offset`` >= 0, ``page`` >= 1; nicht-numerisch/zu klein -> 400 invalid_request;
-    ``limit`` wird ueber ``min(limit, MAX_LIMIT)`` gedeckelt (gedeckelte Seite statt
-    Fehler, Best-Practice #8).
+    Query selbst lesen). ``offset`` >= 0, ``page`` >= 1; nicht-numerisch/zu klein
+    -> 400 invalid_request.
+
+    KANAL-ABHAENGIGER Default (quick-260706-g9q, behebt den Breaking Change aus
+    260706-chc). Aufloesungs-Reihenfolge fuer ``limit`` (Escape-Hatch zuerst):
+
+    1. Vollausgabe-Override: ``limit=all`` ODER ``?all=1`` -> ``limit = None``
+       (unbounded), kanalunabhaengig, schlaegt auch die GPT-Erkennung.
+    2. Explizites numerisches ``limit``: ``>= 1``, ueber ``min(limit, MAX_LIMIT)``
+       gedeckelt (gedeckelte Seite statt Fehler, Best-Practice #8). Der MCP-Client
+       fuellt sein Default-limit selbst als expliziten Query-Parameter und faellt
+       daher genau hierher (kein MCP-Raten im REST-Layer noetig).
+    3. Kein ``limit``: kanal-abhaengiger Default -> ``is_gpt_action(request.headers)``
+       True (GPT-Actions ueber OpenAI-Header/UA) -> ``limit = default_limit``
+       (serverseitig erzwungenes Bound gegen das ~100-KB-GPT-Limit); False
+       (direktes REST) -> ``limit = None`` (Vollausgabe, kein Breaking Change fuer
+       Bestands-Bulk-Nutzer).
 
     ``sort``/``order`` werden fuer diese Datenart-Listen BEWUSST nicht angeboten:
     die zugrunde liegenden Listen tragen keine zugesicherte, stabile serverseitige
@@ -113,12 +156,24 @@ def parse_page_params(request, *, default_limit: int = DEFAULT_LIMIT) -> PagePar
     schneidet.
     """
     qp = request.query_params
-    limit = _parse_int_param(
-        qp.get("limit"), name="limit", minimum=1, default=default_limit
-    )
     offset = _parse_int_param(qp.get("offset"), name="offset", minimum=0, default=0)
     page = _parse_int_param(qp.get("page"), name="page", minimum=1, default=1)
-    limit = min(limit, MAX_LIMIT)
+
+    limit: int | None
+    if _is_full_output_override(qp):
+        # 1. Vollausgabe-Override (kanalunabhaengig).
+        limit = None
+    elif qp.get("limit") is not None:
+        # 2. Explizites numerisches limit (Bestandsverhalten inkl. MAX_LIMIT-Cap).
+        limit = _parse_int_param(
+            qp.get("limit"), name="limit", minimum=1, default=default_limit
+        )
+        limit = min(limit, MAX_LIMIT)
+    else:
+        # 3. Kein limit -> kanal-abhaengiger Default (GPT gebunden, REST voll).
+        headers = getattr(request, "headers", {})
+        limit = default_limit if is_gpt_action(headers) else None
+
     return PageParams(page=page, limit=limit, offset=offset, sort=None, order="asc")
 
 
@@ -137,6 +192,11 @@ def paginate_envelope(
     ``meta["pagination"]`` = total/returned/limit/offset/truncated (keine stille
     Kappung, CLAUDE.md "No silent caps"). Item-Werte werden NICHT umgeschrieben, nur
     die Listenlaenge aendert sich (T-chc: nur Ausschnitt/Weglassen).
+
+    Bei Vollausgabe (``p.limit is None``: direktes REST bzw. ``limit=all``) wird nur
+    ab ``offset`` geschnitten (kein oberes Limit); ``meta.pagination`` weist dann
+    ``limit=null``, ``returned==total`` und ``truncated=false`` aus (transparent auf
+    allen Kanaelen).
 
     ``delivered_count_field`` (nur PoiPayload-Fall): ist es gesetzt, wird
     ``payload[delivered_count_field]`` auf die ausgelieferte Seitenlaenge gesetzt
@@ -158,7 +218,10 @@ def paginate_envelope(
         return
 
     total = len(items)
-    page = items[p.offset : p.offset + p.limit]
+    # limit=None: Vollausgabe (REST-Default / limit=all), nur ab offset.
+    page = (
+        items[p.offset :] if p.limit is None else items[p.offset : p.offset + p.limit]
+    )
     payload[list_key] = page
     returned = len(page)
 

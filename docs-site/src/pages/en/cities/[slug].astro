@@ -45,6 +45,16 @@ const metaTitle = metaTitleLong.length <= 53 ? metaTitleLong : `Open data API fo
 const lead = `Open data for ${city.name} (${stateName}) through a free, keyless REST API: weather, air quality, electricity price and more, delivered as consistent JSON with source and license on every response. No API key, no sign-up.`;
 const weatherExample = `${API_BASE}/api/v1/cities/${city.slug}/weather`;
 const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
+
+// City-specific live GPTs in the ChatGPT Store (only these four cities have a
+// dedicated GPT). The overview /en/gpts/ is linked for every city.
+const cityGpts: Record<string, string> = {
+  berlin: "https://chatgpt.com/g/g-6a4cd71cfcfc819180c9eeafdd8a4ade",
+  hamburg: "https://chatgpt.com/g/g-6a4cd87576948191a94002e9ea5cacbd",
+  muenchen: "https://chatgpt.com/g/g-6a4cd95913cc81918e16c3e561a0bbc4",
+  koeln: "https://chatgpt.com/g/g-6a4cda23b8a08191815349e6f356a4b3",
+};
+const cityGpt = cityGpts[city.slug];
 ---
 
 <Docs
@@ -68,6 +78,8 @@ const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
       `open data ${city.name}`,
       `${city.name} API`,
       `city data ${city.name}`,
+      `MCP server ${city.name}`,
+      `${city.name} MCP`,
       "free API",
       "keyless API",
       "REST API",
@@ -88,6 +100,21 @@ const airExample = `${API_BASE}/api/v1/cities/${city.slug}/air-uba`;
 
   <h1>Open data API for {city.name}</h1>
   <p class="lead">{lead}</p>
+
+  <p class="gpt-callout">
+    {
+      cityGpt && (
+        <span>
+          This city is also available as a ChatGPT GPT:{" "}
+          <a href={cityGpt} rel="noopener" target="_blank">
+            open {city.name} Live in ChatGPT
+          </a>
+          .{" "}
+        </span>
+      )
+    }
+    <a href="/en/gpts/">All InfraNode GPTs</a>.
+  </p>
 
   <table class="cityfacts">
     <tbody>

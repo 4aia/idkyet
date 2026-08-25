@@ -99,15 +99,26 @@ async def fetch_hamburg_road_events(
         ):
             feature_lon, feature_lat = float(coords[0]), float(coords[1])
         # T-9-02: fehlendes Feld -> None (kein KeyError).
+        name = props.get(_FIELD_TITEL)
+        reason = props.get(_FIELD_ANLASS)
+        start = props.get(_FIELD_BEGINN)
+        end = props.get(_FIELD_ENDE)
         events.append(
             {
-                "titel": props.get(_FIELD_TITEL),
+                # Kanonische englische Namen (Muster koeln_arcgis);
+                # "organisation" ist bereits englisch/snake_case und bleibt.
+                "name": name,
                 "organisation": props.get(_FIELD_ORGANISATION),
-                "anlass": props.get(_FIELD_ANLASS),
-                "baubeginn": props.get(_FIELD_BEGINN),
-                "bauende": props.get(_FIELD_ENDE),
+                "reason": reason,
+                "start": start,
+                "end": end,
                 "lat": feature_lat,
                 "lon": feature_lon,
+                # Abgekündigt (alte deutsche Namen), Werte identisch:
+                "titel": name,
+                "anlass": reason,
+                "baubeginn": start,
+                "bauende": end,
             }
         )
 

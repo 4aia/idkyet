@@ -2,7 +2,7 @@
 
 Denkmalschutz ist in Deutschland LANDESsache: jedes Bundesland führt eine eigene
 Denkmalliste, oft als WFS. Es gibt KEINEN bundesweiten Endpunkt. Daher ist der
-Adapter foederiert: ``DENKMAL_WFS`` mappt das Bundesland-Kürzel
+Adapter foederiert: ``HERITAGE_WFS`` mappt das Bundesland-Kürzel
 (``CityRegistryEntry.state``) auf eine WFS-Konfiguration. Ein neues Land erweitert
 die Abdeckung automatisch (``registry.coverage`` leitet die Städte daraus ab).
 
@@ -11,7 +11,7 @@ sobald ihr WFS verifiziert ist (Hamburg liefert nur GML, NRW eigenes Schema ->
 eigene Parser-Logik nötig; Bayern CC-BY-ND = NICHT nutzbar, fail-closed).
 
 Sicherheit (T-SSRF): Host + typeName stammen ausschließlich aus der hartkodierten
-``DENKMAL_WFS``-Registry (KEIN User-Input; ``state`` kommt aus dem validierten
+``HERITAGE_WFS``-Registry (KEIN User-Input; ``state`` kommt aus dem validierten
 Register). DoS-Schutz: ``count`` cappt die Feature-Zahl (analog Overpass
 ``out center``). Der Adapter ist rein (kein Cache/Breaker; das liefert die
 Fassade); ``resp.raise_for_status()`` ist Pflicht (STALE-ON-ERROR-Pfad).
@@ -65,7 +65,7 @@ _DL_DE_BY_URL = "https://www.govdata.de/dl-de/by-2-0"
 # Bundesland-Kürzel -> WFS-Konfiguration. Nur verifizierte, offen lizenzierte
 # Länder (fail-closed). Alle Endpunkte HTTP-verifiziert (GetCapabilities +
 # GetFeature) 2026-07-02.
-DENKMAL_WFS: dict[str, DenkmalSource] = {
+HERITAGE_WFS: dict[str, DenkmalSource] = {
     # Berlin (Stadtstaat): GetCapabilities-verifiziert 2026-06-26, DL-DE/Zero.
     "BE": DenkmalSource(
         url="https://gdi.berlin.de/services/wfs/denkmale",
@@ -202,7 +202,7 @@ async def fetch_heritage(
     ``fields``, ``license_id``/``license_tier``/``attribution``/``license_url``
     und ``features`` (rohe GeoJSON-FeatureCollection-Einträge).
     """
-    src = DENKMAL_WFS[state]
+    src = HERITAGE_WFS[state]
     params = {
         "service": "WFS",
         "version": "2.0.0",

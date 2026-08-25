@@ -76,6 +76,15 @@ _CITY_PEGEL: dict[str, tuple[str, ...]] = {
     "mainz": ("RP_25100100",),  # Mainz / Rhein
     "erfurt": ("TH_57421.0",),  # Erfurt-Möbisburg / Gera
     "bremen": ("HB_4910050",),  # Bremen Große Weserbrücke / Weser
+    # Nord-Ergänzung 2026-07-17 (Geo-Nächster-Pegel via get_lagepegel.php +
+    # Gegenprobe Pegelname/Gewässer via get_infospegel.php):
+    "hannover": ("NI_48800108",),  # Hannover-Herrenhausen / Leine (4 km)
+    "kiel": ("SH_9610066",),  # Kiel-Holtenau / Ostsee (Sturmflut, 6 km)
+    # Magdeburg liegt an der Elbe (dominantes Hochwasserrisiko); naechster
+    # LHP-Elbe-Pegel ist Niegripp ~16 km flussab (kein Pegel im Stadtkern).
+    "magdeburg": ("ST_502240",),  # Niegripp AP / Elbe
+    # Schwerin bewusst OHNE: naechster LHP-Pegel ~29 km (Ostsee Wismar), kein
+    # eindeutiger Stadt-/See-Pegel -> ehrlich not_covered.
 }
 
 

@@ -1,0 +1,286 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "InfraNode Ausschreibungen, oeffentliche Vergaben Deutschland",
+  "version": "1.0.0",
+  "description": "Oeffentliche Ausschreibungen deutscher Staedte. Zuerst Cross-City-Suche via getAllPublicTenders (q=Stichwort, status=aktiv/beendet, since=ISO-Datum, limit/offset zum Blaettern). Stadt-Detail via getCityPublicTenders(slug). Wirtschaftlichen Kontext via getCityEconResource."
+ },
+ "servers": [
+  {
+   "url": "https://infranode.dev"
+  }
+ ],
+ "paths": {
+  "/api/v1/cities": {
+   "get": {
+    "operationId": "getCities",
+    "summary": "Alle bekannten Städte auflisten",
+    "description": "Listet die Einträge des Stadt-Registers: 84 deutsche Großstädte über 100.000 Einwohner, davon 28 Kern-Städte mit voller Quellen-Abdeckung. Jeder Eintrag trägt den Slug, den du als {slug}-Pfadparameter in allen weiteren Endpunkten verwendest.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}": {
+   "get": {
+    "operationId": "getCity",
+    "summary": "Eine Stadt aus dem Register holen",
+    "description": "Liefert den Register-Eintrag zur Stadt mit dem angegebenen {slug}. Ein unbekannter Slug löst den 404-Fehler-Envelope aus, dessen Hint auf die Stadt-Liste verweist.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/public-tenders": {
+   "get": {
+    "operationId": "getCityPublicTenders",
+    "summary": "Öffentliche Auftragsvergabe je Stadt (oeffentlichevergabe.de, Tier A)",
+    "description": "Öffentliche Auftragsbekanntmachungen einer Stadt aus dem Bekanntmachungsdienst des Bundes (oeffentlichevergabe.de, OCDS): laufende Vergabeverfahren und entschiedene Verfahren, je Bekanntmachung Titel, Status, Auftraggeber, Wert und Quell-Link; bei entschiedenen Verfahren zusaetzlich die...",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "description": "Verfahrens-Status (active = laufendes Vergabeverfahren, complete = entschiedenes Verfahren inkl. aufgehobener Vergaben; Detail im Feld award_status).",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "active",
+        "complete"
+       ]
+      }
+     },
+     {
+      "name": "match",
+      "in": "query",
+      "required": false,
+      "description": "Stadt-Zuordnung (buyer_city = Sitz des Amts, place_of_performance = Erfüllungsort).",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "buyer_city",
+        "place_of_performance"
+       ]
+      }
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "Titel-Stichwort (Teilstring, parametrisierter LIKE-Filter).",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "since",
+      "in": "query",
+      "required": false,
+      "description": "Nur Bekanntmachungen ab diesem ISO-Datum YYYY-MM-DD; ungültiges Datum -> 422.",
+      "schema": {
+       "type": "string",
+       "format": "date"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "Seitengröße (Default 50, Cap 200).",
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 200,
+       "default": 50
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "description": "Seiten-Offset (>= 0); Overflow -> leere Seite, no_data.",
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/tenders": {
+   "get": {
+    "operationId": "getAllPublicTenders",
+    "summary": "Öffentliche Auftragsvergabe deutschlandweit (oeffentlichevergabe.de, Tier A)",
+    "description": "Öffentliche Auftragsbekanntmachungen über ALLE Städte im Store aus dem Bekanntmachungsdienst des Bundes (oeffentlichevergabe.de, OCDS): sucht deutschlandweit, ohne jede Stadt einzeln abzufragen. Je Bekanntmachung Titel, Status, Auftraggeber, Wert und Quell-Link.",
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "Titel-Stichwort (Teilstring, parametrisierter LIKE-Filter).",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "description": "Verfahrens-Status (active = laufendes Vergabeverfahren, complete = entschiedenes Verfahren inkl. aufgehobener Vergaben; Detail im Feld award_status).",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "active",
+        "complete"
+       ]
+      }
+     },
+     {
+      "name": "since",
+      "in": "query",
+      "required": false,
+      "description": "Nur Bekanntmachungen ab diesem ISO-Datum YYYY-MM-DD; ungültiges Datum -> 422.",
+      "schema": {
+       "type": "string",
+       "format": "date"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "Seitengröße (Default 50, Cap 200).",
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 200,
+       "default": 50
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "description": "Seiten-Offset (>= 0); Overflow -> leere Seite, no_data.",
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "default": 0
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/{resource}": {
+   "get": {
+    "operationId": "getCityEconResource",
+    "summary": "Wirtschafts-/Kontextdaten einer Stadt abrufen (generisch)",
+    "description": "Wirtschafts- und Kontextdaten einer Stadt fuer die Recherche rund um Ausschreibungen (Gewerbe, Insolvenzen, Bau, Demografie, Arbeitsmarkt, Steuern, Bodenwerte, Kennzahlen) im kanonischen Envelope {data, meta}. data.attribution bei Nennung wiedergeben.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404.",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "resource",
+      "in": "path",
+      "required": true,
+      "description": "Wirtschafts-/Kontext-Datenart: business-registrations, insolvencies, construction, demographics, unemployment, tax-rates, land-values, indicators. Katalog mit Abdeckungsstatus: getCityOverview(slug).",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "business-registrations",
+        "insolvencies",
+        "construction",
+        "demographics",
+        "unemployment",
+        "tax-rates",
+        "land-values",
+        "indicators"
+       ]
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {}
+ }
+}

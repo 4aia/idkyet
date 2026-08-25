@@ -11,7 +11,17 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Wert-Mapping der Wahl-Abdeckung: deutsches ``granularity`` (abgekündigt) ->
+# kanonisches englisches ``coverage_granularity`` (Abkündigung 2026-08-01).
+_ELECTION_COVERAGE_EN: dict[str, str] = {"stadt": "city", "teilweise": "partial"}
+# Inverses Mapping für die Rückrichtung (nur coverage_granularity gesetzt ->
+# granularity rückbefüllen), aus _ELECTION_COVERAGE_EN abgeleitet (eine Quelle
+# der Wahrheit, kein zweites Literal).
+_ELECTION_COVERAGE_DE: dict[str, str] = {
+    en: de for de, en in _ELECTION_COVERAGE_EN.items()
+}
 
 
 class CityBaseDataPayload(BaseModel):
@@ -184,20 +194,22 @@ class WeatherWarningPayload(BaseModel):
     """Amtliche DWD-Wetterwarnungen je Stadt (GeoNutzV, Tier A).
 
     ``max_level`` ist die höchste aktive REGULÄRE Warnstufe (0 = keine reguläre
-    Warnung, 1-4 = DWD-Warnstufe); ``count`` die Anzahl aller aktiven Warnungen;
-    ``warnings`` je Warnung ein dict (event/level/headline/start/end).
+    Warnung, 1-4 = Warnstufe aus der CAP-severity); ``count`` die Anzahl aller
+    aktiven Warnungen; ``warnings`` je Warnung ein dict
+    (event/level/headline/start/end; start/end als ISO-8601-Zeitstempel aus den
+    amtlichen CAP-Zeiten onset/expires, früher Epoch-Millisekunden).
 
-    KRITISCH (Audit K5): Der DWD führt Hitze-/UV-/Sonderwarnungen auf einer
-    EIGENEN Skala (Code >= 50, z.B. 51 = starke Wärmebelastung). Diese fließen
-    NICHT in ``max_level`` ein (sonst überstrahlt eine Hitzewarnung jede echte
-    Sturm-Stufe), sondern werden separat in ``special_warnings`` mit ihrem echten
-    Code geführt (Teilmenge von ``warnings``). Mutable Default via
-    ``Field(default_factory=list)`` (ruff B006).
+    KRITISCH (Audit K5): Hitze-/UV-Gesundheitswarnungen (Brightsky-Kategorie
+    ``health``, früher DWD-Sondercode >= 50) fließen NICHT in ``max_level`` ein
+    (sonst überstrahlt eine Hitzewarnung jede echte Sturm-Stufe), sondern
+    werden separat in ``special_warnings`` geführt (Teilmenge von
+    ``warnings``). Mutable Default via ``Field(default_factory=list)``
+    (ruff B006).
     """
 
     kind: Literal["weather_warning"] = "weather_warning"
     count: int = 0
-    # Höchste reguläre Warnstufe 0-4; Sondercodes >= 50 sind hier ausgeschlossen.
+    # Höchste reguläre Warnstufe 0-4; health-Warnungen sind hier ausgeschlossen.
     max_level: int | None = None
     warnings: list[dict] = Field(default_factory=list)
     special_warnings: list[dict] = Field(default_factory=list)
@@ -239,14 +251,28 @@ class FloodWarningPayload(BaseModel):
     """Hochwasser-Warnungen je Stadt (LHP, Tier A, Event-Layer).
 
     ``warnings`` trägt je kuratiertem Pegel ein dict (z.B. Warnstufe, Pegel).
-    ``stand`` hält den Stand-Zeitstempel-Text der LHP-Antwort (Attributions-
+    ``as_of`` hält den Stand-Zeitstempel-Text der LHP-Antwort (Attributions-
     Pflicht, siehe Mapper). Mutable Default über ``Field(default_factory=list)``
     (ruff B006).
+
+    ``as_of`` ist der kanonische englische Name; das alte deutsche Feld
+    ``stand`` bleibt abgekündigt mit identischem Wert stehen
+    (Abkündigung 2026-08-01).
     """
 
     kind: Literal["flood_warning"] = "flood_warning"
     warnings: list[dict] = Field(default_factory=list)
     stand: str | None = None
+    as_of: str | None = None
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> FloodWarningPayload:
+        """Hält ``as_of`` und das abgekündigte ``stand`` identisch (Bestandsdaten)."""
+        if self.as_of is None:
+            self.as_of = self.stand
+        elif self.stand is None:
+            self.stand = self.as_of
+        return self
 
 
 class PollenUvPayload(BaseModel):
@@ -274,6 +300,10 @@ class FireDangerPayload(BaseModel):
     deutsche Klartext-Label. ``glfi_level``/``glfi_label`` tragen den
     Graslandfeuerindex (best-effort, kann ``None`` sein). ``forecast_date`` ist das
     Vorhersagedatum (ISO), ``updated_at`` der DWD-Aktualisierungszeitpunkt.
+
+    ``federal_state`` ist der kanonische englische Name; das alte deutsche Feld
+    ``bundesland`` bleibt abgekündigt mit identischem Wert stehen
+    (Abkündigung 2026-08-01).
     """
 
     kind: Literal["fire_danger"] = "fire_danger"
@@ -284,9 +314,19 @@ class FireDangerPayload(BaseModel):
     station_name: str | None = None
     station_id: str | None = None
     bundesland: str | None = None
+    federal_state: str | None = None
     distance_km: float | None = None
     forecast_date: str | None = None
     updated_at: str | None = None
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> FireDangerPayload:
+        """Hält ``federal_state`` und das abgekündigte ``bundesland`` identisch."""
+        if self.federal_state is None:
+            self.federal_state = self.bundesland
+        elif self.bundesland is None:
+            self.bundesland = self.federal_state
+        return self
 
 
 class BathingWaterPayload(BaseModel):
@@ -467,22 +507,50 @@ class AdminBoundaryPayload(BaseModel):
 class ElectionResultPayload(BaseModel):
     """Wahlergebnis je Stadt/Kreis (Bundeswahlleiterin, Tier A, DATA-20).
 
-    ``granularity`` weist die Abdeckung ehrlich aus: "stadt" = stadtgenau aus den
-    Wahlkreisen der Stadt aggregiert (saubere Wahlkreis-Vereinigung, Audit-Finding
-    47); "teilweise" (Default) = Wahlkreis/Kreis-Ebene, Stadt nur teilweise
-    (RESEARCH Pitfall 7). Mutable Liste IMMER via ``Field(default_factory=list)``
-    (ruff B006).
+    ``coverage_granularity`` weist die Abdeckung ehrlich aus: "city" = stadtgenau
+    aus den Wahlkreisen der Stadt aggregiert (saubere Wahlkreis-Vereinigung,
+    Audit-Finding 47); "partial" (Default) = Wahlkreis/Kreis-Ebene, Stadt nur
+    teilweise (RESEARCH Pitfall 7). Mutable Liste IMMER via
+    ``Field(default_factory=list)`` (ruff B006).
+
+    ``coverage_granularity`` ist der kanonische englische Name mit englischen
+    Werten ("city"/"partial"); das alte deutsche Feld ``granularity`` bleibt
+    abgekündigt mit den deutschen Werten ("stadt"/"teilweise") und identischer
+    Bedeutung stehen (Abkündigung 2026-08-01).
     """
 
     kind: Literal["election_result"] = "election_result"
     election: str | None = None
     granularity: str = "teilweise"
+    coverage_granularity: str | None = None
     area_name: str | None = None
     # [VERIFIED 2026-06-10] Wahlbeteiligung aus der kerg2-Zeile
     # Gruppenname=="Wählende", Spalte Prozent (String mit Dezimal-KOMMA,
     # z.B. "82,5122"); additiv ergänzt, nicht brechend.
     turnout: str | None = None
     results: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> ElectionResultPayload:
+        """Hält ``coverage_granularity`` und das abgekündigte ``granularity`` synchron.
+
+        Hin-Richtung: Bestandsdaten (persistierte Snapshots ohne das neue Feld)
+        erhalten den englischen Wert per Wert-Mapping "stadt"->"city",
+        "teilweise"->"partial"; ein unbekannter Alt-Wert wird unverändert
+        durchgereicht (ehrlich statt stillem None). Rückrichtung: wird NUR
+        ``coverage_granularity`` gesetzt, wird ``granularity`` per inversem
+        Mapping rückbefüllt; ``model_fields_set`` unterscheidet den Default
+        "teilweise" von einem explizit gesetzten Wert.
+        """
+        if self.coverage_granularity is None:
+            self.coverage_granularity = _ELECTION_COVERAGE_EN.get(
+                self.granularity, self.granularity
+            )
+        elif "granularity" not in self.model_fields_set:
+            self.granularity = _ELECTION_COVERAGE_DE.get(
+                self.coverage_granularity, self.coverage_granularity
+            )
+        return self
 
 
 class HolidayPayload(BaseModel):
@@ -514,38 +582,22 @@ class HospitalPayload(BaseModel):
     reference_date: str | None = None
 
 
-class IcuCapacityPayload(BaseModel):
-    """Intensivbetten-Kapazität je Kreis (DIVI, Tier C live-only, DATA-25b).
-
-    Klinikscharfes DB-Schutzrecht -> Tier C, nur Live-Anzeige (RESEARCH Pitfall 4).
-    Alle Felder optional. ``beds_free``/``beds_occupied`` trägt nur noch das
-    Tier-A-Kreis-Aggregat (RKI-DIVI-CSV, mappers/divi.py); die Live-API liefert
-    [VERIFIED 2026-06-10] KEINE numerische Belegung mehr, sondern qualitative
-    Status-Einschätzungen je Klinik in ``hospitals`` (bezeichnung, ort,
-    letzte_meldung, status_high_care, status_ecmo). Additiv erweitert (nicht
-    brechend); mutable Liste IMMER via ``Field(default_factory=list)``
-    (ruff B006).
-    """
-
-    kind: Literal["icu_capacity"] = "icu_capacity"
-    kreis_id: str | None = None
-    kreis_name: str | None = None
-    beds_free: int | None = None
-    beds_occupied: int | None = None
-    hospitals: list[dict] = Field(default_factory=list)
-    datum: str | None = None
-
-
 class RoadEventPayload(BaseModel):
     """Innerstaedtische Baustellen + Sperrungen je Stadt (DATA-15, Tier A).
 
     Bündelt die Pro-Stadt-Verkehrsereignisse (Berlin VIZ, Hamburg, Köln,
     München, MobiData BW) zu einer einheitlichen Liste schlanker Event-dicts.
-    ``city_source`` weist die konkrete Quelle aus (berlin_viz/hamburg_baustellen/
-    koeln_verkehr/muenchen_baustellen/mobidata_bw). Keine strikte Geometry-
+    ``city_source`` weist die konkrete Quelle aus (berlin_viz/hamburg_roadworks/
+    koeln_road_events/muenchen_roadworks/mobidata_bw). Keine strikte Geometry-
     Validierung im Schema (Berlin liefert GeometryCollection, RESEARCH Pitfall 6):
     je Event ein schlankes dict. Mutable Liste IMMER via
     ``Field(default_factory=list)`` (ruff B006).
+
+    Köln-Events tragen die kanonischen Namen ``name``/``start``/``end``/
+    ``event_type`` plus ``event_type_label`` (Klartext aus der codierten
+    Werteliste des Dienstes); die alten deutschen Felder ``bezeichnung``/
+    ``beginn``/``ende``/``art`` bleiben abgekündigt mit identischem Wert
+    stehen (Konsistenz-Audit 2026-07-25).
     """
 
     kind: Literal["road_event"] = "road_event"
@@ -727,7 +779,11 @@ class FuelPricePayload(BaseModel):
     bzw. Minimum je Sorte (e5/e10/diesel, EUR/Liter) über die geöffneten
     Tankstellen mit gültigem Preis. ``station_count`` = Tankstellen im Radius,
     ``open_count`` = davon geöffnet. ``stations`` trägt je Tankstelle ein
-    schlankes dict (station_id/name/brand/e5/e10/diesel/is_open/dist_km). Quelle:
+    schlankes dict (station_id/name/brand/e5/e10/diesel/is_open/dist_km; additiv
+    lat/lon = Koordinate der Tankstelle für die Kartendarstellung sowie street/
+    house_number/post_code/place = gemeldete Adresse, post_code immer als
+    fünfstelliger String, distance_km = kanonischer Name neben dem
+    abgekündigten dist_km; fehlt ein Feld upstream -> None). Quelle:
     Markttransparenzstelle für Kraftstoffe (MTS-K) via Tankerkönig. Mutable
     Default via ``Field(default_factory=list)`` (ruff B006).
     """
@@ -786,6 +842,35 @@ class IndicatorsPayload(BaseModel):
     indicators: list[dict] = Field(default_factory=list)
 
 
+class IndicatorSeriesPayload(BaseModel):
+    """Indikator-ZEITREIHEN je Stadt (Wegweiser Kommune, CC0, Tier A).
+
+    Bewusst GENERISCH gehalten: ``dataset`` trägt die Datenart (z.B.
+    ``sustainability``), damit jede weitere Wegweiser-Datenart ohne eine neue
+    Payload-Klasse auskommt. Gleiches Muster wie ``RegionalStatPayload``, das
+    ebenfalls über ein ``dataset``-Feld mehrere Datenarten bedient.
+
+    Unterschied zu ``IndicatorsPayload`` (INKAR/BBSR): dort steht je Indikator
+    genau EIN Wert, hier die ganze Reihe. ``indicators`` trägt je Indikator
+    ``key`` (Indikator-Schlüssel der Quelle), ``name``, ``unit``, ``source``
+    (die Ursprungsstatistik hinter der Berechnung), ``explanation``,
+    ``latest_year``/``latest_value`` (jüngster Punkt, damit Clients ohne
+    Zeitreihen-Interesse nicht selbst suchen müssen) und ``series`` als nach Jahr
+    aufsteigende Liste von ``{"year": int, "value": float}``.
+
+    ``year_min``/``year_max`` spannen den Bereich über ALLE Indikatoren auf.
+    Jahre mit fehlendem Wert erscheinen nicht in ``series`` (nie eine erfundene
+    Null). Mutable Default via ``Field(default_factory=list)`` (ruff B006).
+    """
+
+    kind: Literal["indicator_series"] = "indicator_series"
+    dataset: str
+    indicator_count: int = 0
+    year_min: int | None = None
+    year_max: int | None = None
+    indicators: list[dict] = Field(default_factory=list)
+
+
 class CrimeStatsPayload(BaseModel):
     """Polizeiliche Kriminalstatistik je Kreis (BKA PKS, Tier A, PKS-01).
 
@@ -822,6 +907,13 @@ class StationDeparturesPayload(BaseModel):
     ``long_distance_count`` =
     davon Fernverkehr. Quelle: DB Timetables (CC BY 4.0). Mutable Default via
     ``Field(default_factory=list)`` (ruff B006).
+
+    ``trip_stop_id`` identifiziert EINEN HALT EINER ZUGFAHRT und ist KEINE
+    Haltestellen-ID: fuer ``/live/{city}/transit/departures`` wird die DELFI-ID
+    aus ``/cities/{slug}/transit`` gebraucht. Das gleichwertige ``stop_id``
+    heisst nur noch aus Kompatibilitaetsgruenden so und ist abgekuendigt
+    (Konsistenz-Audit 2026-07-25; die Namensgleichheit war die Ursache
+    taeglicher 400er auf der Live-Route).
     """
 
     kind: Literal["station_departures"] = "station_departures"
@@ -841,6 +933,10 @@ class StationArrivalsPayload(BaseModel):
     ``{type, code, category, timestamp}``).
     ``arrival_count`` = Anzahl, ``long_distance_count`` = davon Fernverkehr. Quelle:
     DB Timetables (CC BY 4.0). Mutable Default via ``Field(default_factory=list)``.
+
+    ``trip_stop_id`` identifiziert wie bei den Abfahrten EINEN HALT EINER
+    ZUGFAHRT, nicht eine Haltestelle; ``stop_id`` traegt denselben Wert und ist
+    abgekuendigt (Konsistenz-Audit 2026-07-25).
     """
 
     kind: Literal["station_arrivals"] = "station_arrivals"
@@ -859,9 +955,12 @@ class StationCatalogPayload(BaseModel):
     ``/stations/{eva}/departures``), ``evas`` (ALLE EVA-Nummern des Bahnhofs;
     Großbahnhöfe haben mehrere Ebenen, deren Abfahrtstafel teils an einer
     Ebenen-EVA hängt statt an der Haupt-EVA -> Fallback für Split-Bahnhöfe),
-    ``name``, ``category`` (1-7, je kleiner desto
-    groesser/wichtiger der Bahnhof), ``lat``/``lon`` (aus der EVA-Geokoordinate)
-    und ``zip`` (PLZ). ``station_count`` = Anzahl. Quelle: DB StaDa (CC BY 4.0).
+    ``name``, ``station_category`` (1-7, je kleiner desto
+    groesser/wichtiger der Bahnhof; das gleichwertige ``category`` ist
+    abgekuendigt, weil dieser Name anderswo ein Text-Label traegt),
+    ``lat``/``lon`` (aus der EVA-Geokoordinate)
+    und ``post_code`` (PLZ, fünfstelliger String; ``zip`` trägt denselben Wert
+    und ist abgekündigt). ``station_count`` = Anzahl. Quelle: DB StaDa (CC BY 4.0).
     Mutable Default via ``Field(default_factory=list)`` (ruff B006).
     """
 
@@ -878,8 +977,10 @@ class LandValuesPayload(BaseModel):
     ohne Wald/Wasser/Landwirtschaft) im Stadtgebiet zu einer
     Kennzahl: ``brw_median_eur_m2`` (Median des Bodenrichtwerts in EUR/m2),
     ``brw_min_eur_m2``/``brw_max_eur_m2`` (Spanne) und ``zone_count`` (Anzahl der
-    berücksichtigten Zonen). ``stichtag`` ist der Bewertungsstichtag des
-    Landes-WFS (ISO-Datum, z.B. "2026-01-01"). ``bbox_radius_deg`` dokumentiert
+    berücksichtigten Zonen). ``reference_date`` ist der Bewertungsstichtag des
+    Landes-WFS (ISO-Datum, z.B. "2026-01-01"); das alte deutsche Feld
+    ``stichtag`` bleibt abgekündigt mit identischem Wert stehen
+    (Abkündigung 2026-08-01). ``bbox_radius_deg`` dokumentiert
     den Umkreis um das Stadtzentrum, über den aggregiert wurde (ehrliche
     Methoden-Transparenz: kein amtlicher Stadtgrenzen-Schnitt, sondern eine
     Bounding-Box). Regionale Auflösung ist das Stadtgebiet; BORIS ist pro
@@ -892,6 +993,7 @@ class LandValuesPayload(BaseModel):
     brw_max_eur_m2: float | None = None
     zone_count: int = 0
     stichtag: str | None = None
+    reference_date: str | None = None
     bbox_radius_deg: float | None = None
     # True, wenn die Werte NORMIERTE Bodenrichtwerte sind (auf 1000 m2/GFZ 1.0
     # normiert, z.B. Hamburg): grober Indikator, NICHT cross-city-vergleichbar und
@@ -901,6 +1003,15 @@ class LandValuesPayload(BaseModel):
     # Bauland-Zonen umfasst (nur Live-Pfad; Archiv-/Ingest-Zeilen führen das Feld
     # nicht -> Default False). Methoden-Transparenz, Audit 2026-06-29.
     truncated: bool = False
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> LandValuesPayload:
+        """Hält ``reference_date`` und das abgekündigte ``stichtag`` identisch."""
+        if self.reference_date is None:
+            self.reference_date = self.stichtag
+        elif self.stichtag is None:
+            self.stichtag = self.reference_date
+        return self
 
 
 class PopulationDensityPayload(BaseModel):
@@ -928,14 +1039,21 @@ class TaxRatesPayload(BaseModel):
     """Realsteuer-Hebesätze einer Gemeinde (Regionalstatistik 71231, Tier A, DATA-37).
 
     Die amtlichen Hebesätze der Realsteuern GEMEINDE-genau (Realsteuervergleich
-    der Statistischen Ämter, Tabelle 71231): ``gewerbesteuer_hebesatz`` (Hebesatz
-    der Gewerbesteuer in %), ``grundsteuer_a`` (land-/forstwirtschaftliche
-    Betriebe), ``grundsteuer_b`` (Grundstücke) und ``grundsteuer_c`` (baureife,
+    der Statistischen Ämter, Tabelle 71231): ``trade_tax_rate`` (Hebesatz
+    der Gewerbesteuer in %), ``property_tax_a`` (land-/forstwirtschaftliche
+    Betriebe), ``property_tax_b`` (Grundstücke) und ``property_tax_c`` (baureife,
     unbebaute Grundstücke; erst seit 2025 möglich, daher oft ``None``). Alle
     Werte sind ganze Prozentpunkte; ein nicht festgesetzter Satz ist ``None``
-    (Quelle-Sperrwert "-"). ``stichtag`` ist der Bewertungsstichtag (ISO-Datum,
-    Stand 31.12., neuester verfügbarer Jahrgang). Standort-/immobilienrelevante
-    Kennzahl, die kaum anderswo als API gemeindegenau vorliegt.
+    (Quelle-Sperrwert "-"). ``reference_date`` ist der Bewertungsstichtag
+    (ISO-Datum, Stand 31.12., neuester verfügbarer Jahrgang). Standort-/
+    immobilienrelevante Kennzahl, die kaum anderswo als API gemeindegenau
+    vorliegt.
+
+    ``trade_tax_rate``/``property_tax_a``/``property_tax_b``/``property_tax_c``/
+    ``reference_date`` sind die kanonischen englischen Namen; die alten deutschen
+    Felder ``gewerbesteuer_hebesatz``/``grundsteuer_a``/``grundsteuer_b``/
+    ``grundsteuer_c``/``stichtag`` bleiben abgekündigt mit identischem Wert
+    stehen (Abkündigung 2026-08-01).
     """
 
     kind: Literal["tax_rates"] = "tax_rates"
@@ -944,18 +1062,53 @@ class TaxRatesPayload(BaseModel):
     grundsteuer_b: int | None = None
     grundsteuer_c: int | None = None
     stichtag: str | None = None
+    trade_tax_rate: int | None = None
+    property_tax_a: int | None = None
+    property_tax_b: int | None = None
+    property_tax_c: int | None = None
+    reference_date: str | None = None
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> TaxRatesPayload:
+        """Hält die kanonischen und die abgekündigten deutschen Felder identisch."""
+        if self.trade_tax_rate is None:
+            self.trade_tax_rate = self.gewerbesteuer_hebesatz
+        elif self.gewerbesteuer_hebesatz is None:
+            self.gewerbesteuer_hebesatz = self.trade_tax_rate
+        if self.property_tax_a is None:
+            self.property_tax_a = self.grundsteuer_a
+        elif self.grundsteuer_a is None:
+            self.grundsteuer_a = self.property_tax_a
+        if self.property_tax_b is None:
+            self.property_tax_b = self.grundsteuer_b
+        elif self.grundsteuer_b is None:
+            self.grundsteuer_b = self.property_tax_b
+        if self.property_tax_c is None:
+            self.property_tax_c = self.grundsteuer_c
+        elif self.grundsteuer_c is None:
+            self.grundsteuer_c = self.property_tax_c
+        if self.reference_date is None:
+            self.reference_date = self.stichtag
+        elif self.stichtag is None:
+            self.stichtag = self.reference_date
+        return self
 
 
 class BusinessRegistrationsPayload(BaseModel):
     """Gewerbean-/-abmeldungen je Kreis (Regionalstatistik 52311, Tier A, DATA-37).
 
     Die Gründungsdynamik aus der Gewerbeanzeigenstatistik (Tabelle 52311,
-    Jahressumme, KREIS-genau, ohne Automatenaufsteller): ``anmeldungen``
-    (Gewerbeanmeldungen), ``abmeldungen`` (Gewerbeabmeldungen) und ``saldo``
-    (anmeldungen - abmeldungen; positiv = Netto-Gründungsplus). ``jahr`` ist das
-    Berichtsjahr (neuester Jahrgang, für den beide Kennzahlen vorliegen).
-    Regionale Auflösung ist der Kreis/die kreisfreie Stadt (kreisfreie Städte
-    stadtgenau, sonst der umgebende Kreis).
+    Jahressumme, KREIS-genau, ohne Automatenaufsteller): ``registrations``
+    (Gewerbeanmeldungen), ``deregistrations`` (Gewerbeabmeldungen) und
+    ``balance`` (registrations - deregistrations; positiv =
+    Netto-Gründungsplus). ``year`` ist das Berichtsjahr (neuester Jahrgang, für
+    den beide Kennzahlen vorliegen). Regionale Auflösung ist der Kreis/die
+    kreisfreie Stadt (kreisfreie Städte stadtgenau, sonst der umgebende Kreis).
+
+    ``registrations``/``deregistrations``/``balance``/``year`` sind die
+    kanonischen englischen Namen; die alten deutschen Felder ``anmeldungen``/
+    ``abmeldungen``/``saldo``/``jahr`` bleiben abgekündigt mit identischem Wert
+    stehen (Abkündigung 2026-08-01).
     """
 
     kind: Literal["business_registrations"] = "business_registrations"
@@ -963,32 +1116,82 @@ class BusinessRegistrationsPayload(BaseModel):
     abmeldungen: int | None = None
     saldo: int | None = None
     jahr: int | None = None
+    registrations: int | None = None
+    deregistrations: int | None = None
+    balance: int | None = None
+    year: int | None = None
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> BusinessRegistrationsPayload:
+        """Hält die kanonischen und die abgekündigten deutschen Felder identisch."""
+        if self.registrations is None:
+            self.registrations = self.anmeldungen
+        elif self.anmeldungen is None:
+            self.anmeldungen = self.registrations
+        if self.deregistrations is None:
+            self.deregistrations = self.abmeldungen
+        elif self.abmeldungen is None:
+            self.abmeldungen = self.deregistrations
+        if self.balance is None:
+            self.balance = self.saldo
+        elif self.saldo is None:
+            self.saldo = self.balance
+        if self.year is None:
+            self.year = self.jahr
+        elif self.jahr is None:
+            self.jahr = self.year
+        return self
 
 
 class InsolvenciesPayload(BaseModel):
     """Beantragte Insolvenzen je Kreis (Regionalstatistik 52411, Tier A, INSO-01).
 
     Aus der Insolvenzstatistik der Statistischen Ämter (Tabelle 52411,
-    Jahressumme, KREIS-genau): ``unternehmensinsolvenzen`` (beantragte
+    Jahressumme, KREIS-genau): ``corporate_insolvencies`` (beantragte
     Unternehmensinsolvenzen, Tabelle 52411-02, Measure ISV006) und
-    ``uebrige_schuldner_insolvenzen`` (beantragte Insolvenzen übriger Schuldner,
-    Tabelle 52411-03, Measure ISV007). ``jahr`` ist das Berichtsjahr (neuester
+    ``other_debtor_insolvencies`` (beantragte Insolvenzen übriger Schuldner,
+    Tabelle 52411-03, Measure ISV007). ``year`` ist das Berichtsjahr (neuester
     Jahrgang, für den BEIDE Kennzahlen vorliegen).
 
     Ehrliche Benennung (RESEARCH Pitfall 2): die übrigen Schuldner sind NICHT
     deckungsgleich mit Verbrauchern. Sie umfassen Verbraucher, ehemalige
     Selbstständige und sonstige natürliche Personen; reine Verbraucher
     (ISV004) sind nur eine Teilmenge und auf Kreisebene nicht durchgängig
-    verfügbar. Daher trägt der Payload bewusst ``uebrige_schuldner_insolvenzen``
-    statt eines irreführenden ``verbraucherinsolvenzen``. Regionale Auflösung ist
+    verfügbar. Daher trägt der Payload bewusst ``other_debtor_insolvencies``
+    statt eines irreführenden ``consumer_insolvencies``. Regionale Auflösung ist
     der Kreis/die kreisfreie Stadt (kreisfreie Städte stadtgenau, sonst der
     umgebende Kreis).
+
+    ``corporate_insolvencies``/``other_debtor_insolvencies``/``year`` sind die
+    kanonischen englischen Namen; die alten deutschen Felder
+    ``unternehmensinsolvenzen``/``uebrige_schuldner_insolvenzen``/``jahr``
+    bleiben abgekündigt mit identischem Wert stehen (Abkündigung 2026-08-01).
     """
 
     kind: Literal["insolvencies"] = "insolvencies"
     unternehmensinsolvenzen: int | None = None
     uebrige_schuldner_insolvenzen: int | None = None
     jahr: int | None = None
+    corporate_insolvencies: int | None = None
+    other_debtor_insolvencies: int | None = None
+    year: int | None = None
+
+    @model_validator(mode="after")
+    def _sync_deprecated_fields(self) -> InsolvenciesPayload:
+        """Hält die kanonischen und die abgekündigten deutschen Felder identisch."""
+        if self.corporate_insolvencies is None:
+            self.corporate_insolvencies = self.unternehmensinsolvenzen
+        elif self.unternehmensinsolvenzen is None:
+            self.unternehmensinsolvenzen = self.corporate_insolvencies
+        if self.other_debtor_insolvencies is None:
+            self.other_debtor_insolvencies = self.uebrige_schuldner_insolvenzen
+        elif self.uebrige_schuldner_insolvenzen is None:
+            self.uebrige_schuldner_insolvenzen = self.other_debtor_insolvencies
+        if self.year is None:
+            self.year = self.jahr
+        elif self.jahr is None:
+            self.jahr = self.year
+        return self
 
 
 class SolarRoofsPayload(BaseModel):
@@ -1102,15 +1305,36 @@ class PublicTenderPayload(BaseModel):
     Bekanntmachung der Stadt zugeordnet wurde ("buyer_city" = Auftraggeber-Sitz,
     "place_of_performance" = Erfüllungsort): eine Bekanntmachung kann beide
     Pfade tragen. ``buyer_city`` trägt den (slugifizierten) Stadt-Bezug, ``nuts``
-    den NUTS-3-Code des Auftraggebers/Erfuellungsorts. Mutable Liste IMMER via
-    ``Field(default_factory=list)`` (ruff B006).
+    den NUTS-3-Code des Auftraggebers/Erfuellungsorts. ``status`` trägt den
+    fachlichen Verfahrensstand ("active" = laufendes Vergabeverfahren aus der
+    Auftragsbekanntmachung, "complete" = entschiedenes Verfahren inkl.
+    aufgehobener/eingestellter Vergaben, None = kein definierter Stand),
+    semantisch aus dem notice_type abgeleitet. ``award_status`` trägt den ROHEN
+    OCDS-Zuschlag-Status ("active" = Zuschlag erteilt, "pending", "unsuccessful"
+    = aufgehoben/eingestellt, None wenn keine awards) und dient der
+    Differenzierung Zuschlag-erteilt vs aufgehoben innerhalb entschiedener
+    Verfahren. ``suppliers`` traegt die Auftragnehmer-Namen (OCDS
+    parties[role=supplier] bzw. awards[].suppliers; leere Liste = Quelle legt
+    nicht offen, ca. 43% der Awards). ``award_value``/``award_currency`` tragen
+    den tatsaechlich VERGEBENEN Auftragswert (awards[].value bzw.
+    contracts[].value), getrennt vom Ausschreibungs-/Schaetzwert ``value``
+    (tender.value/lots). ``deadline`` (Angebotsfrist) ist praktisch immer None:
+    der DE-OCDS-Export traegt kein tender.tenderPeriod.endDate (Upstream-
+    Luecke, gegen Tagesexport 2026-07-09 verifiziert: 0 von 748 tender-
+    Releases); das Feld bleibt fuer kuenftige Export-Erweiterungen erhalten.
+    Mutable Liste IMMER via ``Field(default_factory=list)`` (ruff B006).
     """
 
     kind: Literal["public_tender"] = "public_tender"
     notice_id: str
     notice_version: str
+    # Bekanntmachungs-UUID (OCDS release.id, Fix 2026-07-08): das Portal erwartet
+    # in der Detailseiten-URL (?noticeId=...) diese UUID, NICHT die tender.id;
+    # Grundlage fuer source_url. None, wenn der Export keine release.id traegt.
+    release_id: str | None = None
     notice_type: str | None = None
     status: str | None = None
+    award_status: str | None = None
     title: str | None = None
     buyer_name: str | None = None
     buyer_city: str | None = None
@@ -1122,6 +1346,13 @@ class PublicTenderPayload(BaseModel):
     publication_date: str | None = None
     deadline: str | None = None
     award_date: str | None = None
+    # Auftragnehmer (Fix 2026-07-13): Namen aus parties[role=supplier] bzw.
+    # awards[].suppliers[]; leere Liste = Quelle legt nicht offen.
+    suppliers: list[str] = Field(default_factory=list)
+    # Zuschlagswert (Fix 2026-07-13): awards[].value bzw. contracts[].value;
+    # getrennt vom Ausschreibungswert value (tender.value/lots[].value).
+    award_value: float | None = None
+    award_currency: str | None = None
     match: list[str] = Field(default_factory=list)
     source_url: str | None = None
 
@@ -1143,6 +1374,162 @@ class OfficeWaitTimesPayload(BaseModel):
 
     kind: Literal["office_wait_times"] = "office_wait_times"
     offices: list[dict] = Field(default_factory=list)
+
+
+class ParkingOnStreetPayload(BaseModel):
+    """Bewirtschafteter Strassenparkraum je Stadt (Tier A, keylos, Stammdaten).
+
+    Quick-260729-muc, Teilabdeckung (nur muenchen). Quelle: Mobilitaetsreferat der
+    Landeshauptstadt Muenchen, vier WFS-Layer, DL-DE/BY 2.0.
+
+    Die Zaehler beschreiben den Gesamtbestand: ``segment_count`` (Parkseiten =
+    Strassenabschnitte mit eigener Parkregelung), ``total_spaces`` (Summe der
+    Stellplaetze aller Segmente), ``zone_count`` (Parkraummanagementgebiete),
+    ``accessible_bay_count``/``accessible_spaces`` (Behindertenparkplaetze) und
+    ``loading_zone_count``/``loading_spaces`` (Halteflaechen zum Laden, Liefern,
+    Leisten).
+
+    Die drei Aggregate tragen je Eintrag ``segment_count`` und ``spaces``:
+    ``by_regulation`` (je ``regulation_group``, z. B. Bewohnerparken oder
+    Mischparken, nach Stellplaetzen absteigend), ``by_street`` (je ``street``,
+    alphabetisch) und ``zones`` (je Gebiet mit ``measure``, ``status``,
+    ``enforcement`` und ``opened``). ``accessible_bays`` und ``loading_zones``
+    tragen je Eintrag ihre Koordinate (``lat``/``lon``).
+
+    Die Rohsegmente selbst werden bewusst nicht ausgeliefert (fuenfstellige
+    Anzahl); die Aggregate sind die nutzbare Sicht. Zero-Trust: kaputte/fehlende
+    Felder werden zu ``None``, nie zu einem Fehler. Mutable Default IMMER via
+    ``Field(default_factory=list)`` (ruff B006).
+    """
+
+    kind: Literal["parking_onstreet"] = "parking_onstreet"
+    segment_count: int | None = None
+    total_spaces: int | None = None
+    zone_count: int | None = None
+    accessible_bay_count: int | None = None
+    accessible_spaces: int | None = None
+    loading_zone_count: int | None = None
+    loading_spaces: int | None = None
+    by_regulation: list[dict] = Field(default_factory=list)
+    by_street: list[dict] = Field(default_factory=list)
+    zones: list[dict] = Field(default_factory=list)
+    accessible_bays: list[dict] = Field(default_factory=list)
+    loading_zones: list[dict] = Field(default_factory=list)
+
+
+class ParkAndRidePayload(BaseModel):
+    """P+R- und B+R-Anlagen je Stadt (Tier A, keylos, Stammdaten + Prognose).
+
+    Quick-260729-muc, Teilabdeckung (nur muenchen). Quelle: P+R Park & Ride GmbH
+    Muenchen ueber opendata.muenchen.de, DL-DE/BY 2.0.
+
+    ``car_facilities`` traegt je Anlage ``name``, ``address``, ``lat``/``lon``,
+    die Stellplatzzahlen (``spaces_total`` plus ``spaces_accessible``,
+    ``spaces_women``, ``spaces_family``, ``spaces_electric``,
+    ``spaces_motorcycle``), ``structure_type`` (Parkhaus, Tiefgarage,
+    Parkplatz), ``entrance_height_m``, ``barrier_operation``, ``max_duration``,
+    die Preise (``price_single_eur``, ``price_ten_trip_eur``,
+    ``price_month_eur``, ``price_year_eur``, ``price_level``),
+    ``transit_lines`` und ``occupancy_forecast``.
+
+    ``occupancy_forecast`` ist eine PROGNOSE aus historischen Erfahrungswerten,
+    KEINE Echtzeit-Belegung: je Tagesart (``weekday``, ``saturday``, ``sunday``)
+    eine Ampelstufe (``green`` = mehr als 75 Prozent frei, ``yellow``, ``red``)
+    pro Zeitscheibe. Ohne Prognose-Zeile zur Anlage bleibt das Feld ``None``.
+
+    ``bike_facilities`` traegt je Bike+Ride-Anlage ``spaces``,
+    ``structure_type``, ``at_park_and_ride`` und ``transit_lines``. Zero-Trust:
+    kaputte/fehlende Felder werden zu ``None``, nie zu einem Fehler. Mutable
+    Default IMMER via ``Field(default_factory=list)`` (ruff B006).
+    """
+
+    kind: Literal["park_and_ride"] = "park_and_ride"
+    car_facility_count: int | None = None
+    car_spaces_total: int | None = None
+    bike_facility_count: int | None = None
+    bike_spaces_total: int | None = None
+    car_facilities: list[dict] = Field(default_factory=list)
+    bike_facilities: list[dict] = Field(default_factory=list)
+
+
+class MobilityPointPayload(BaseModel):
+    """Mobilitaetspunkte und Carsharing-Parkflaechen je Stadt (Tier A, keylos).
+
+    Quick-260729-muc, Teilabdeckung (nur muenchen). Quelle: Mobilitaetsreferat der
+    Landeshauptstadt Muenchen, drei WFS-Layer, DL-DE/BY 2.0.
+
+    ``points`` traegt je Mobilitaetspunkt (Informationsstele mit gebuendelten
+    Angeboten) ``name``, ``address``, ``lat``/``lon``, ``carsharing_spaces``,
+    ``taxi_spaces``, ``charging_points_ac``/``charging_points_dc``, die
+    Abstellflaechen-Flags fuer geteilte Mikromobilitaet
+    (``has_scooter_area``, ``has_bikeshare_area``, ``has_cargo_bike_area``,
+    ``has_moped_area``), ``has_bike_service_station``, ``has_bike_pump``, die
+    OePNV-Anbindung (``near_bus``, ``near_tram``, ``near_subway``,
+    ``near_suburban_rail``) und ``updated``.
+
+    ``carsharing_areas`` traegt je Parkflaeche ``kind`` (``general`` = alle in
+    der Stadt registrierten Carsharing-Fahrzeuge, ``station_based`` = nur die dem
+    Anbieter zugewiesenen), ``provider``, ``type_label``, ``district``,
+    ``in_service_since`` und die Koordinate. Zero-Trust: kaputte/fehlende Felder
+    werden zu ``None``, nie zu einem Fehler. Mutable Default IMMER via
+    ``Field(default_factory=list)`` (ruff B006).
+    """
+
+    kind: Literal["mobility_point"] = "mobility_point"
+    point_count: int | None = None
+    carsharing_area_count: int | None = None
+    carsharing_spaces: int | None = None
+    points: list[dict] = Field(default_factory=list)
+    carsharing_areas: list[dict] = Field(default_factory=list)
+
+
+class BikeParkingPayload(BaseModel):
+    """Radabstellanlagen je Stadt (Tier A, keylos).
+
+    Quick-260729-mrp, Teilabdeckung (nur muenchen). Quelle: Mobilitaetsreferat der
+    Landeshauptstadt Muenchen, zwei WFS-Layer (Fahrradparken mit Standardmassen +
+    Lastenradparken), DL-DE/BY 2.0.
+
+    NUR DER BESTAND wird gezaehlt: die Quelle fuehrt denselben Layer auch fuer
+    geplante, abgebaute und ausser Betrieb genommene Anlagen. Deren Stellplaetze
+    in die Summe zu nehmen wuerde den heutigen Radparkraum um rund 17 Prozent zu
+    hoch ausweisen, deshalb stehen sie getrennt in ``planned_facilities``,
+    ``removed_facilities`` und ``out_of_service_facilities``.
+
+    ``facility_count``/``spaces_total`` sind die Bestandssummen; die Merkmale
+    (``covered_facilities``, ``double_deck_facilities``, ``lit_facilities``,
+    ``time_limited_facilities``, ``bike_and_ride_facilities`` samt Plaetzen)
+    beziehen sich ebenfalls nur auf den Bestand. ``time_limited_facilities``
+    zaehlt die Anlagen mit einer zeitlichen Nutzungsbeschraenkung; deren Wortlaut
+    steht je Anlage in ``time_limit`` (Freitext der Quelle, z. B. "Werktags 9 bis
+    23 Uhr"), denn die Quelle fuehrt dort kein Ja/Nein. ``by_type`` aggregiert je
+    Bauform (Anlehnbuegel, Rahmenhalter, Vorderradhalter, Doppelstockanlage,
+    Fahrradstaender), ``cargo_bike`` fuehrt die Lastenradanlagen getrennt, weil
+    sie in einem eigenen Layer liegen und fuer andere Fahrzeuge ausgelegt sind.
+
+    Die einzelnen Anlagen (3.720 Datensaetze) werden NICHT ausgeliefert: das
+    waeren mehrere hundert Kilobyte je Antwort. ``largest_facilities`` zeigt die
+    zwanzig groessten Standorte, damit die Antwort trotzdem konkret ist.
+    Zero-Trust: kaputte/fehlende Felder werden zu ``None``, nie zu einem Fehler.
+    Mutable Default IMMER via ``Field(default_factory=list)`` (ruff B006).
+    """
+
+    kind: Literal["bike_parking"] = "bike_parking"
+    facility_count: int | None = None
+    spaces_total: int | None = None
+    covered_facilities: int | None = None
+    double_deck_facilities: int | None = None
+    lit_facilities: int | None = None
+    time_limited_facilities: int | None = None
+    bike_and_ride_facilities: int | None = None
+    bike_and_ride_spaces: int | None = None
+    planned_facilities: int | None = None
+    planned_spaces: int | None = None
+    removed_facilities: int | None = None
+    out_of_service_facilities: int | None = None
+    by_type: list[dict] = Field(default_factory=list)
+    cargo_bike: dict | None = None
+    largest_facilities: list[dict] = Field(default_factory=list)
 
 
 PayloadUnion = Annotated[
@@ -1174,6 +1561,7 @@ PayloadUnion = Annotated[
     | SolarRoofsPayload
     | DistrictHeatingPayload
     | IndicatorsPayload
+    | IndicatorSeriesPayload
     | CrimeStatsPayload
     | LandValuesPayload
     | PopulationDensityPayload
@@ -1187,7 +1575,6 @@ PayloadUnion = Annotated[
     | ElectionResultPayload
     | HolidayPayload
     | HospitalPayload
-    | IcuCapacityPayload
     | RoadEventPayload
     | WebcamPayload
     | EventPayload
@@ -1200,6 +1587,10 @@ PayloadUnion = Annotated[
     | TransitTripPayload
     | TransitRouteStatusPayload
     | PublicTenderPayload
-    | OfficeWaitTimesPayload,
+    | OfficeWaitTimesPayload
+    | ParkingOnStreetPayload
+    | ParkAndRidePayload
+    | MobilityPointPayload
+    | BikeParkingPayload,
     Field(discriminator="kind"),
 ]

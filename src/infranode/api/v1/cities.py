@@ -18,16 +18,21 @@ selbst-korrigierendem Hint, der ``GET /api/v1/health`` nennt (DX-06).
 from __future__ import annotations
 
 import asyncio
+import math
 import os
+import unicodedata
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any, Literal, NamedTuple
 
 from asgi_correlation_id import correlation_id
 from fastapi import APIRouter, Request, Response
 
+from infranode.adapters.aachen_parking import fetch_aachen_parking
 from infranode.adapters.autobahn import fetch_traffic, fetch_webcams
 from infranode.adapters.baumkataster import fetch_trees
 from infranode.adapters.bbk_nina import ars_for_ags, fetch_for_ags
-from infranode.adapters.berlin_radzaehl import fetch_berlin_radzaehl
+from infranode.adapters.berlin_radzaehl import fetch_berlin_bike_counts
 from infranode.adapters.berlin_viz import fetch_berlin_road_events
 from infranode.adapters.db_fasta import fetch_station_facilities
 from infranode.adapters.db_timetables import (
@@ -36,37 +41,38 @@ from infranode.adapters.db_timetables import (
 )
 from infranode.adapters.denkmal import fetch_heritage
 from infranode.adapters.destination_one import fetch_events
-from infranode.adapters.divi_live import fetch_icu_live
 from infranode.adapters.dortmund_baustellen import fetch_dortmund_road_events
-from infranode.adapters.duesseldorf_radzaehl import fetch_duesseldorf_radzaehl
+from infranode.adapters.dortmund_parking import fetch_dortmund_parking
+from infranode.adapters.duesseldorf_radzaehl import fetch_duesseldorf_bike_counts
 from infranode.adapters.dwd import fetch_weather
 from infranode.adapters.dwd_fire import fetch_fire_danger
 from infranode.adapters.dwd_pollen import fetch_pollen_uv
-from infranode.adapters.dwd_warnings import (
-    extract_warncell,
-    fetch_dwd_warnings_all,
-    warncell_for_ags,
-)
+from infranode.adapters.dwd_warnings import fetch_dwd_warnings
 from infranode.adapters.eea_bathing import fetch_bathing_water
-from infranode.adapters.essen_radzaehl import fetch_essen_radzaehl
-from infranode.adapters.gbfs import fetch_sharing
+from infranode.adapters.essen_radzaehl import fetch_essen_bike_counts
+from infranode.adapters.gbfs import GbfsSystem, fetch_sharing
 from infranode.adapters.genesis import (
     fetch_demographics,
     fetch_genesis_table,
     fetch_hospitals,
 )
-from infranode.adapters.hamburg_radzaehl import fetch_hamburg_radzaehl
+from infranode.adapters.hamburg_parking import fetch_hamburg_parking
+from infranode.adapters.hamburg_radzaehl import fetch_hamburg_bike_counts
 from infranode.adapters.hamburg_transparenz import fetch_hamburg_road_events
+from infranode.adapters.kaiserslautern_parking import fetch_kaiserslautern_parking
+from infranode.adapters.karlsruhe_parking import fetch_karlsruhe_parking
 from infranode.adapters.klinik_atlas import fetch_hospital_atlas
 from infranode.adapters.koeln_arcgis import fetch_koeln_road_events
 from infranode.adapters.koeln_events import fetch_events as fetch_koeln_events
-from infranode.adapters.koeln_radzaehl import fetch_koeln_radzaehl
-from infranode.adapters.koeln_wartezeiten import fetch_koeln_wartezeiten
-from infranode.adapters.leipzig_radzaehl import fetch_leipzig_radzaehl
+from infranode.adapters.koeln_radzaehl import fetch_koeln_bike_counts
+from infranode.adapters.koeln_wartezeiten import fetch_koeln_wait_times
+from infranode.adapters.leipzig_radzaehl import fetch_leipzig_bike_counts
 from infranode.adapters.lhp import fetch_flood
 from infranode.adapters.mobidata_bw import fetch_mobidata_road_events
+from infranode.adapters.mobidata_parkapi import fetch_mobidata_parking
 from infranode.adapters.mobilithek_datex2 import (
     fetch_datex2,
+    fetch_koeln_parking,
     fetch_magdeburg_parking,
     fetch_wuppertal_parking,
 )
@@ -75,39 +81,60 @@ from infranode.adapters.muenchen_opendata import (
     fetch_muenchen_parking,
     fetch_muenchen_road_events,
 )
-from infranode.adapters.muenchen_radzaehl import fetch_muenchen_radzaehl
+from infranode.adapters.muenchen_radzaehl import fetch_muenchen_bike_counts
+from infranode.adapters.muenchen_ruhver import (
+    fetch_muenchen_bike_parking,
+    fetch_muenchen_mobility_points,
+    fetch_muenchen_park_and_ride,
+    fetch_muenchen_parking_onstreet,
+)
+from infranode.adapters.muenster_parking import fetch_muenster_parking
+from infranode.adapters.oldenburg_parking import fetch_oldenburg_parking
 from infranode.adapters.overpass import (
     _ALLOWED_TYPES,
-    fetch_osm_feature,
-    fetch_pois,
+    _OSM_FEATURES,
 )
-from infranode.adapters.parkendd import PARKENDD_CITIES, fetch_parkendd
+from infranode.adapters.parkendd import fetch_parkendd
 from infranode.adapters.pegelonline import fetch_water_level
+from infranode.adapters.rostock_baustellen import fetch_rostock_road_events
 from infranode.adapters.smard import fetch_smard
 from infranode.adapters.solar import fetch_solar
 from infranode.adapters.sperrinfosys import fetch_sperrinfosys_road_events
 from infranode.adapters.stada import fetch_all_stations
-from infranode.adapters.stuttgart_radzaehl import fetch_stuttgart_radzaehl
+from infranode.adapters.stuttgart_radzaehl import fetch_stuttgart_bike_counts
 from infranode.adapters.tankerkoenig import fetch_fuel_prices
 from infranode.adapters.uba import fetch_air_uba
 from infranode.adapters.wikidata import fetch_city_base, fetch_hospitals_wikidata
 from infranode.adapters.zensus_grid import fetch_population_density
-from infranode.api.errors import UnprocessableError, UpstreamError
-from infranode.api.v1.pagination import paginate_envelope, parse_page_params
+from infranode.api.errors import (
+    NotFoundError,
+    UnprocessableError,
+    UpstreamError,
+    ValidationFailedError,
+)
+from infranode.api.v1.pagination import (
+    _parse_int_param,
+    paginate,
+    paginate_envelope,
+    parse_page_params,
+)
 from infranode.archive.bka_pks_db import read_crime_stats
 from infranode.archive.boris_db import read_land_values
+from infranode.archive.council_db import count_council_papers, read_council_papers
 from infranode.archive.inkar_db import read_indicators
 from infranode.archive.kba_db import read_vehicle_registrations
 from infranode.archive.mastr_db import read_energy
+from infranode.archive.osm_pois_db import count_pois, read_pois
 from infranode.archive.regionalstatistik_db import (
     read_business_registrations,
     read_insolvencies,
     read_tax_rates,
 )
 from infranode.archive.store import append_record, read_records
-from infranode.archive.tender_db import read_public_tenders
+from infranode.archive.tender_db import read_public_tenders, search_public_tenders
 from infranode.archive.transit_store import read_stops
 from infranode.archive.unfallatlas_db import read_accidents
+from infranode.archive.wegweiser_db import read_series
 from infranode.charging.geomap import load_city_points
 from infranode.charging.store import get_point_statuses
 from infranode.config import Settings
@@ -121,16 +148,17 @@ from infranode.normalization.mappers.baumkataster import map_trees
 from infranode.normalization.mappers.bbk_nina import map_bbk_nina
 from infranode.normalization.mappers.berlin_viz import map_berlin_road_events
 from infranode.normalization.mappers.bike_counts import (
-    map_berlin_radzaehl,
-    map_duesseldorf_radzaehl,
-    map_essen_radzaehl,
-    map_hamburg_radzaehl,
-    map_koeln_radzaehl,
-    map_leipzig_radzaehl,
-    map_stuttgart_radzaehl,
+    map_berlin_bike_counts,
+    map_duesseldorf_bike_counts,
+    map_essen_bike_counts,
+    map_hamburg_bike_counts,
+    map_koeln_bike_counts,
+    map_leipzig_bike_counts,
+    map_stuttgart_bike_counts,
 )
 from infranode.normalization.mappers.bka_pks import map_crime_stats
 from infranode.normalization.mappers.boris import map_land_values
+from infranode.normalization.mappers.db_bahnpark import map_db_bahnpark
 from infranode.normalization.mappers.db_fasta import map_station_facilities
 from infranode.normalization.mappers.db_timetables import (
     map_station_arrivals,
@@ -160,20 +188,22 @@ from infranode.normalization.mappers.hospital import (
     map_hospital,
     map_hospital_wikidata,
 )
-from infranode.normalization.mappers.icu_live import map_icu_live
 from infranode.normalization.mappers.inkar import map_indicators
 from infranode.normalization.mappers.kba import map_vehicle_registrations
 from infranode.normalization.mappers.klinik_atlas import map_hospital_atlas
 from infranode.normalization.mappers.koeln_arcgis import map_koeln_road_events
 from infranode.normalization.mappers.koeln_events import map_koeln_events
-from infranode.normalization.mappers.koeln_wartezeiten import map_koeln_wartezeiten
+from infranode.normalization.mappers.koeln_wartezeiten import map_koeln_wait_times
 from infranode.normalization.mappers.lhp import map_flood
 from infranode.normalization.mappers.mastr import map_mastr_assets
 from infranode.normalization.mappers.mobidata_bw import map_mobidata_road_events
+from infranode.normalization.mappers.mobidata_parkapi import map_mobidata_parking
 from infranode.normalization.mappers.mobilithek_afir import map_city_charging_status
 from infranode.normalization.mappers.mobilithek_bremen import map_bremen_road_events
 from infranode.normalization.mappers.mobilithek_parken import (
+    map_dortmund_parking,
     map_frankfurt_parking,
+    map_koeln_parking,
     map_magdeburg_parking,
     map_wuppertal_parking,
 )
@@ -181,7 +211,17 @@ from infranode.normalization.mappers.muenchen_opendata import (
     map_muenchen_parking,
     map_muenchen_road_events,
 )
-from infranode.normalization.mappers.muenchen_radzaehl import map_muenchen_radzaehl
+from infranode.normalization.mappers.muenchen_radzaehl import map_muenchen_bike_counts
+from infranode.normalization.mappers.muenchen_ruhver import (
+    map_muenchen_bike_parking,
+    map_muenchen_mobility_points,
+    map_muenchen_park_and_ride,
+    map_muenchen_parking_onstreet,
+)
+from infranode.normalization.mappers.oparl import (
+    COUNCIL_CITY_LICENSE,
+    COVERED_COUNCIL_CITIES,
+)
 from infranode.normalization.mappers.overpass import map_osm_feature, map_overpass_pois
 from infranode.normalization.mappers.parkendd import map_parkendd
 from infranode.normalization.mappers.pegelonline import map_water_level
@@ -189,6 +229,9 @@ from infranode.normalization.mappers.regionalstatistik import (
     map_business_registrations,
     map_insolvencies,
     map_tax_rates,
+)
+from infranode.normalization.mappers.rostock_baustellen import (
+    map_rostock_road_events,
 )
 from infranode.normalization.mappers.smard import map_smard
 from infranode.normalization.mappers.solar import map_solar
@@ -200,11 +243,26 @@ from infranode.normalization.mappers.sperrinfosys import (
     map_sperrinfosys_road_events,
 )
 from infranode.normalization.mappers.stada import map_station_catalog
+from infranode.normalization.mappers.stadt_parking import (
+    map_aachen_parking,
+    map_hamburg_parking,
+    map_muenster_parking,
+    map_oldenburg_parking,
+)
+from infranode.normalization.mappers.stadt_parking_b import (
+    map_kaiserslautern_parking,
+    map_karlsruhe_parking,
+)
 from infranode.normalization.mappers.tankerkoenig import map_fuel_prices
 from infranode.normalization.mappers.uba import map_air_uba
 from infranode.normalization.mappers.unfallatlas import map_accidents
+from infranode.normalization.mappers.wegweiser import (
+    dataset_indicators,
+    map_indicator_series,
+)
 from infranode.normalization.mappers.wikidata import map_wikidata_city
 from infranode.normalization.mappers.zensus_grid import map_population_density
+from infranode.parking.db_bahnpark_store import load_db_bahnpark
 from infranode.registry import get_city, list_cities
 from infranode.registry.catalog import CITY_DATA_CATALOG
 from infranode.registry.coverage import PARTIAL_COVERAGE, covered_cities, is_covered
@@ -262,14 +320,14 @@ def _mark_deprecated(response: Response, successor: str) -> None:
 # Genau diese 5 Slugs sind registriert und get_city-gültig.
 CONNECTOR_MAP: dict[str, tuple] = {
     "berlin": ("berlin_viz", fetch_berlin_road_events, map_berlin_road_events),
-    "koeln": ("koeln_verkehr", fetch_koeln_road_events, map_koeln_road_events),
+    "koeln": ("koeln_road_events", fetch_koeln_road_events, map_koeln_road_events),
     "hamburg": (
-        "hamburg_baustellen",
+        "hamburg_roadworks",
         fetch_hamburg_road_events,
         map_hamburg_road_events,
     ),
     "muenchen": (
-        "muenchen_baustellen",
+        "muenchen_roadworks",
         fetch_muenchen_road_events,
         map_muenchen_road_events,
     ),
@@ -279,7 +337,7 @@ CONNECTOR_MAP: dict[str, tuple] = {
         map_mobidata_road_events,
     ),
     "dortmund": (
-        "dortmund_baustellen",
+        "dortmund_roadworks",
         fetch_dortmund_road_events,
         map_dortmund_road_events,
     ),
@@ -302,7 +360,13 @@ CONNECTOR_MAP: dict[str, tuple] = {
     # city_road_events-Handler den mTLS-Sonderpfad (_bremen_road_events); der
     # generische keylose Pfad wird für Bremen NICHT betreten. Eintrag hält die
     # Coverage-Karte (PARTIAL_COVERAGE["road-events"]) drift-synchron.
-    "bremen": ("bremen_baustellen", None, map_bremen_road_events),
+    "bremen": ("bremen_roadworks", None, map_bremen_road_events),
+    # Rostock: keyloser OpenData.HRO-GeoJSON-Feed (CC0), stadtscharf.
+    "rostock": (
+        "rostock_roadworks",
+        fetch_rostock_road_events,
+        map_rostock_road_events,
+    ),
 }
 
 # Drift-Schutz (verbindlich): die road-events-Abdeckung in der öffentlichen
@@ -322,11 +386,25 @@ if set(CONNECTOR_MAP) != set(PARTIAL_COVERAGE["road-events"]):
 # hafen); der BBox-Filter im Adapter trennt sie wieder. Pro System prüft der
 # Adapter die GBFS-``license_id`` fail-closed gegen die Tier-A-Allowlist
 # (GOV-02/04). Kein Eintrag für einen Slug -> ehrliches not_covered.
-GBFS_SYSTEMS: dict[str, tuple[str, ...]] = {
+GBFS_SYSTEMS: dict[str, tuple[str | GbfsSystem, ...]] = {
     "berlin": ("nextbike_bn",),
     "muenchen": ("nextbike_ml",),
     "koeln": ("nextbike_kg",),
-    "frankfurt-am-main": ("nextbike_ff",),
+    # Nextbike Frankfurt eingestellt (gbfs.json 404), Ersatz DB Call a Bike ueber
+    # den MobiData-BW-GBFS-Aggregator (System-ID callabike, GBFS 2.3, Discovery ohne
+    # .json-Suffix). MobiData BW liefert kein system_information.license_id -> der
+    # kuratierte Tier-A-Override DL-DE/BY-2.0 greift fail-closed. Quelle:
+    # mobidata-bw.de/dataset/bikesh. Host api.mobidata-bw.de ist fest kuratiert
+    # (SSRF, T-9q0-01), nie aus User-Input gebaut.
+    "frankfurt-am-main": (
+        GbfsSystem(
+            system_id="callabike",
+            base_url="https://api.mobidata-bw.de",
+            discovery_path="/sharing/gbfs/v2/{system_id}/gbfs",
+            license_override="DL-DE/BY-2.0",
+            attribution="Deutsche Bahn Connect GmbH / MobiData BW, DL-DE/BY-2.0",
+        ),
+    ),
     "duesseldorf": ("nextbike_dd",),
     "dresden": ("nextbike_dx",),
     "leipzig": ("nextbike_le",),
@@ -348,6 +426,19 @@ GBFS_SYSTEMS: dict[str, tuple[str, ...]] = {
     "ludwigshafen-am-rhein": ("nextbike_vn",),
     "hanau": ("nextbike_hg",),
     "leverkusen": ("nextbike_dw",),
+    # Kiel: SprottenFlotte laeuft auf Donkey Republic (GBFS 3.0), nicht Nextbike.
+    # Betreiber-Feed fuehrt system_information.license_id = "CC0-1.0" (verifiziert
+    # 2026-07-17) -> greift durch die fail-closed Tier-A-Allowlist ohne Override.
+    # Regionalsystem donkey_kielsmile (KielRegion + Smile24); die Stadt-BBox
+    # filtert auf Kiel. Host stables.donkey.bike fest kuratiert (SSRF, T-9q0-01).
+    "kiel": (
+        GbfsSystem(
+            system_id="donkey_kielsmile",
+            base_url="https://stables.donkey.bike",
+            discovery_path="/api/public/gbfs/3.0/{system_id}/gbfs.json",
+            attribution="Donkey Republic / SprottenFlotte (CC0)",
+        ),
+    ),
 }
 
 # Drift-Schutz (verbindlich, wie CONNECTOR_MAP): die sharing-Abdeckung in der
@@ -604,6 +695,14 @@ async def city_weather(slug: str, request: Request) -> dict:
     }
 
 
+# Schlüssel aller Katalog-Datenarten (= letztes Pfadsegment von
+# ``/cities/{slug}/<key>``). Genutzt vom 422-Hinweis der POI-Route: raet ein Client
+# ``?type=playgrounds``, nennt der Hinweis den eigenen Endpunkt statt nur die sechs
+# ?type=-Werte. Aus CITY_DATA_CATALOG abgeleitet, damit eine neue Datenart hier nie
+# nachgezogen werden muss.
+_CATALOG_KEYS: frozenset[str] = frozenset(dt.key for dt in CITY_DATA_CATALOG)
+
+
 # --- City-Overview (Owner 2026-06-24): EIN Aufruf zeigt die ganze Breite ----------
 # Stufe 1 = statischer Katalog ALLER Datenarten je Stadt (aus CITY_DATA_CATALOG +
 # Coverage, kein Upstream-Call). Stufe 2 = schlanker Live-Highlight-Snapshot
@@ -657,7 +756,7 @@ async def _snapshot_one(entry, request: Request, name: str) -> tuple[str, dict]:
 
     try:
         raw, status = await client.fetch(source, cache_key, fetch_fn)
-    except Exception:  # noqa: BLE001 - Snapshot degradiert still (Overview hängt nie)
+    except Exception:
         return name, {"data": None, "source_status": "error"}
     if raw is None:
         return name, {"data": None, "source_status": "error"}
@@ -667,7 +766,7 @@ async def _snapshot_one(entry, request: Request, name: str) -> tuple[str, dict]:
         record = mapper(
             raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
         )
-    except Exception:  # noqa: BLE001 - defekter Datensatz einer Quelle -> error
+    except Exception:
         return name, {"data": None, "source_status": "error"}
     return name, {
         "data": record.model_dump(mode="json"),
@@ -726,7 +825,7 @@ async def _snapshot_departures(entry, request: Request) -> tuple[str, dict]:
             )
 
         raw, status = await client.fetch("db_timetables", cache_key, fetch_fn)
-    except Exception:  # noqa: BLE001 - Snapshot degradiert still (Overview hängt nie)
+    except Exception:
         return name, {"data": None, "source_status": "error"}
     if raw is None:
         return name, {"data": None, "source_status": "error"}
@@ -736,7 +835,7 @@ async def _snapshot_departures(entry, request: Request) -> tuple[str, dict]:
         record = map_station_departures(
             raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
         )
-    except Exception:  # noqa: BLE001 - defekter Datensatz -> error statt 5xx
+    except Exception:
         return name, {"data": None, "source_status": "error"}
     return name, {
         "data": record.model_dump(mode="json"),
@@ -800,7 +899,7 @@ async def city_overview(slug: str, request: Request) -> dict:
         # mit. wait_for cancelt die Coroutine bei Budget-Überschreitung.
         try:
             return await asyncio.wait_for(coro, budget)
-        except Exception:  # noqa: BLE001 - Timeout/Fehler -> nur diese Quelle "error"
+        except Exception:
             return name, {"data": None, "source_status": "error"}
 
     tasks = [
@@ -1173,7 +1272,8 @@ async def city_air_uba(slug: str, request: Request, response: Response) -> dict:
 
     KRITISCH (Pitfall 2 / Lizenz-Klassifikation GOV-02): UBA ist der Tier-A-
     Luftpfad (offene Lizenz). Diese Route ``/air-uba`` persistiert Tier A; der
-    ältere Pfad ``/air`` (oben) liefert dieselbe UBA-Quelle live ohne Persistenz.
+    ältere Pfad ``/air`` (oben) nutzt dieselbe UBA-Quelle und persistiert Tier A
+    ebenso.
     Graceful Degradation: toter Upstream ohne Cache -> 503 mit Hint (DX-06).
     """
     entry = get_city(slug)
@@ -1792,17 +1892,42 @@ async def city_station_facilities(slug: str, request: Request) -> dict:
     }
 
 
+def _osm_rows_to_elements(rows: list[dict]) -> list[dict]:
+    """Rekonstruiert aus Store-Zeilen rohe Overpass-Elemente für die Mapper.
+
+    Der Precompute-Store liefert je POI ein flaches dict ``{name, lat, lon, ...extra}``
+    (``osm_pois_db.read_pois``); die unveränderten Mapper (``map_overpass_pois`` /
+    ``map_osm_feature``, ODbL/Tier B, Drift-Tests) erwarten dagegen rohe Overpass-
+    Elemente der Form ``{tags:{name, ...extra}, lat, lon}``. Diese Brücke hält die
+    Lizenz-/Attributions-/Truncation-Ableitung in EINER Quelle (den Mappern),
+    obwohl die Daten jetzt aus dem Store statt live von Overpass kommen.
+    """
+    elements: list[dict] = []
+    for r in rows:
+        tags = {k: v for k, v in r.items() if k not in ("lat", "lon")}
+        elements.append({"tags": tags, "lat": r.get("lat"), "lon": r.get("lon")})
+    return elements
+
+
 @router.get("/cities/{slug}/pois")
-async def city_pois(slug: str, request: Request, type: str) -> dict:
+# A002 unterdrueckt: der Parametername IST der oeffentliche Query-Parameter
+# (?type=), eine Umbenennung braeche den API-Vertrag.
+async def city_pois(slug: str, request: Request, type: str) -> dict:  # noqa: A002
     """Liefert nach Typ gefilterte OSM-POIs im kanonischen Envelope (DATA-04).
 
-    Ablauf (DATA-04/06, API-01, GOV-02): Register-Lookup (unbekannter
-    Slug -> 404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), Typ-Whitelist-
-    Prüfung VOR dem Fetch (unbekannter Typ -> 422, kein roher Input in die
-    Overpass-QL, T-05-09), resilienter Fetch über die Fassade (der ``type``
-    fließt per ``params`` als sha256-Hash in den Cache-Key -> Cache-Poisoning-
-    Schutz T-05-10), Mapping, dann der Daten-Envelope.
+    Ablauf (DATA-04/06, API-01, GOV-02): Register-Lookup (unbekannter Slug -> 404
+    mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung (deaktiviert ->
+    200 ``source_status=disabled``, nie 5xx), Typ-Whitelist-Prüfung (unbekannter
+    Typ -> 422, T-05-09), read-only-Lesung aus dem Precompute-Store, Mapping, dann
+    der Daten-Envelope.
+
+    Read-only (wie council-papers/public-tenders): ein periodischer Batch-Ingest
+    (``ingest.osm_pois``, wöchentlich) extrahiert die POIs offline aus dem Geofabrik-
+    Deutschland-Extrakt in den ``osm_pois``-Store; die Route liest AUSSCHLIESSLICH
+    daraus, NIE live über eine Fremd-Overpass-Instanz (keine Fair-Use-/Rate-Limit-
+    Abhängigkeit mehr). ``total_available`` ist der echte Gesamtbestand
+    (``count_pois``), ``items`` die auf ``overpass_max_elements`` gedeckelte
+    Stichprobe (``read_pois``); der Mapper leitet ``truncated`` daraus ab.
     """
     entry = get_city(slug)
 
@@ -1817,70 +1942,79 @@ async def city_pois(slug: str, request: Request, type: str) -> dict:
             },
         }
 
-    # T-05-09 Injection: unbekannter Typ -> 422, BEVOR ein Fetch läuft. Roher
-    # User-Input gelangt nie in die Overpass-QL (die Whitelist mappt auf ein
-    # festes amenity-Tag). Der Hint nennt die erlaubten Typen.
+    # T-05-09 Injection: unbekannter Typ -> 422. Die Whitelist bleibt die Quelle der
+    # erlaubten POI-Typen (identisch zum Ingest über ``osm_poi_tags``); roher User-
+    # Input gelangt nie in eine Store-Query (``read_pois`` bindet ?-parametrisiert).
     if type not in _ALLOWED_TYPES:
-        raise UnprocessableError(
-            f"Unbekannter POI-Typ '{type}'.",
-            hint=f"Erlaubte Typen: {', '.join(sorted(_ALLOWED_TYPES))}.",
-        )
+        # Befund 2026-07-26: der osm_pois-Store trägt 17 Typen, ``?type=`` erlaubt
+        # aber nur die 6 klassischen POI-Typen. Die anderen 11 (playgrounds,
+        # post-boxes, public-wifi, ...) sind eigene Datenarten mit eigenem Endpunkt.
+        # Wer die hier rät, bekam bisher nur die 6er-Liste und keinen Weg zum Ziel
+        # (live: 58 x 422 auf /cities/osnabrueck/pois am 25.07.). Ist der geratene
+        # Typ eine Katalog-Datenart, nennt der Hinweis jetzt deren Pfad. Der
+        # Katalog bleibt die eine Quelle der Datenart-Schlüssel (kein zweiter
+        # Hartkodier-Ort, der beim Hinzufügen einer Datenart veraltet).
+        hint = f"Erlaubte Typen: {', '.join(sorted(_ALLOWED_TYPES))}."
+        if type in _CATALOG_KEYS:
+            hint = (
+                f"'{type}' ist eine eigene Datenart: "
+                f"GET /api/v1/cities/{entry.slug}/{type}. "
+                f"Über ?type= laufen nur {', '.join(sorted(_ALLOWED_TYPES))}."
+            )
+        raise UnprocessableError(f"Unbekannter POI-Typ '{type}'.", hint=hint)
 
-    client = request.app.state.resilient_client
-    # type als params -> sha256-Hash im Cache-Key (Cache-Poisoning-Schutz, T-05-10).
-    key = build_cache_key("overpass", city_slug=entry.slug, params={"type": type})
+    # Read-only aus dem Precompute-Store. ``total_available`` = echter Gesamtbestand,
+    # ``items`` = gedeckelte Stichprobe; leerer Store -> ehrliches 200 no_data.
+    max_elements = Settings().overpass_max_elements
+    rows = read_pois(entry.slug, type, limit=max_elements)
+    total = count_pois(entry.slug, type)
 
-    async def fetch_fn():
-        return await fetch_pois(
-            request.app.state.http,
-            slug=entry.slug,
-            osm_relation=entry.osm_relation,
-            poi_type=type,
-            base_url=Settings().overpass_base_url,
-            max_elements=Settings().overpass_max_elements,
-        )
+    if not rows:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "no_data",
+            },
+        }
 
-    raw, status = await client.fetch("overpass", key, fetch_fn)
-
-    # Pitfall 4: raw is None (toter Upstream ohne Cache) MUSS vor dem Mapper
-    # geprüft werden, sonst 500. 503 mit selbst-korrigierendem Hint (DX-06).
-    if raw is None:
-        raise UpstreamError(
-            "Quelle 'overpass' voruebergehend nicht erreichbar, kein gecachter "
-            "Wert vorhanden.",
-            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
-        )
-
+    raw = {
+        "slug": entry.slug,
+        "poi_type": type,
+        "elements": _osm_rows_to_elements(rows),
+        "total_available": total,
+    }
     record = map_overpass_pois(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
-    await append_record(record, source="osm")
 
     return {
         "data": record.model_dump(mode="json"),
         "meta": {
             "correlation_id": correlation_id.get(),
             "source_status": "ok",
-            "cache_status": status,
         },
     }
 
 
 async def _osm_feature_response(request: Request, entry, feature: str) -> dict:
-    """Geteilte Logik aller OSM-Feature-Endpunkte (Overpass, Tier B copyleft).
+    """Geteilte Logik aller OSM-Feature-Endpunkte (OSM, Tier B copyleft).
 
     Identischer Ablauf wie ``/pois`` (DATA-04/06): Quellen-Toggle (deaktiviert ->
-    200 ``source_status=disabled``, nie 5xx), resilienter Fetch über die Fassade
-    (``feature`` fließt per ``params`` als sha256-Hash in den Cache-Key, Cache-
-    Poisoning-Schutz T-05-10), None-Guard (toter Upstream ohne Cache -> 503), dann
-    Mapping mit ODbL-Attribution und Daten-Envelope. ``feature`` ist stets ein
-    festes, intern gesetztes Literal aus ``_OSM_FEATURES`` (kein User-Input).
+    200 ``source_status=disabled``, nie 5xx), read-only-Lesung aus dem Precompute-
+    Store, leerer Store -> 200 ``no_data``, dann Mapping mit ODbL-Attribution und
+    Daten-Envelope. ``feature`` ist stets ein festes, intern gesetztes Literal aus
+    ``_OSM_FEATURES`` (kein User-Input); die je Feature deklarierten Zusatz-Tags
+    (``extra_tags``) reicht der Mapper aus dem Store durch.
+
+    Read-only wie ``/pois``: der Batch-Ingest (``ingest.osm_pois``, wöchentlich)
+    füllt den Store offline, die Route liest AUSSCHLIESSLICH daraus (nie live).
 
     Die ``items``-Liste ist über ``limit`` (Default 50, max 200) + ``offset``
     paginierbar; ``meta.pagination`` weist total/returned/truncated ehrlich aus,
     Offset-Overflow -> leere Seite 200. ``payload.count`` trägt die ausgelieferte
     Seitenlänge (PoiPayload-Semantik), ``total_available`` bleibt der echte
-    Overpass-Gesamtbestand. So erben education/playgrounds/post-boxes/
+    Gesamtbestand aus dem Store. So erben education/playgrounds/post-boxes/
     parcel-lockers/public-wifi und die übrigen OSM-Features limit/offset."""
     if not Settings().enable_overpass:
         return {
@@ -1891,46 +2025,42 @@ async def _osm_feature_response(request: Request, entry, feature: str) -> dict:
             },
         }
 
-    client = request.app.state.resilient_client
-    # feature als params -> sha256-Hash im Cache-Key (Cache-Poisoning-Schutz).
-    key = build_cache_key("overpass", city_slug=entry.slug, params={"feature": feature})
+    # Read-only aus dem Precompute-Store (feature ist internes Literal aus
+    # _OSM_FEATURES). total_available = echter Gesamtbestand, items = gedeckelte
+    # Stichprobe; leerer Store -> ehrliches 200 no_data.
+    max_elements = Settings().overpass_max_elements
+    rows = read_pois(entry.slug, feature, limit=max_elements)
+    total = count_pois(entry.slug, feature)
 
-    async def fetch_fn():
-        return await fetch_osm_feature(
-            request.app.state.http,
-            slug=entry.slug,
-            osm_relation=entry.osm_relation,
-            feature=feature,
-            base_url=Settings().overpass_base_url,
-            max_elements=Settings().overpass_max_elements,
-        )
+    if not rows:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "no_data",
+            },
+        }
 
-    raw, status = await client.fetch("overpass", key, fetch_fn)
-
-    # Pitfall 4: raw is None (toter Upstream ohne Cache) MUSS vor dem Mapper
-    # geprüft werden, sonst 500. 503 mit selbst-korrigierendem Hint (DX-06).
-    if raw is None:
-        raise UpstreamError(
-            "Quelle 'overpass' voruebergehend nicht erreichbar, kein gecachter "
-            "Wert vorhanden.",
-            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
-        )
-
+    raw = {
+        "slug": entry.slug,
+        "poi_type": feature,
+        "extra_tags": list(_OSM_FEATURES[feature].extra_tags),
+        "elements": _osm_rows_to_elements(rows),
+        "total_available": total,
+    }
     record = map_osm_feature(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
-    await append_record(record, source="osm")
 
     data = record.model_dump(mode="json")
     meta = {
         "correlation_id": correlation_id.get(),
         "source_status": "ok",
-        "cache_status": status,
     }
     # Listen-Paginierung (DATA-04): items-Liste begrenzen. delivered_count_field=
     # "count" -> PoiPayload.count == ausgelieferte Seite; total_available bleibt der
-    # echte Overpass-Gesamtbestand. Der Helper liest limit/offset selbst aus der
-    # Query (kein Depends), daher erben alle OSM-Route-Signaturen die Paginierung.
+    # echte Gesamtbestand. Der Helper liest limit/offset selbst aus der Query (kein
+    # Depends), daher erben alle OSM-Route-Signaturen die Paginierung.
     p = parse_page_params(request)
     paginate_envelope(data, meta, p, list_key="items", delivered_count_field="count")
     return {"data": data, "meta": meta}
@@ -2050,7 +2180,7 @@ async def city_heritage(slug: str, request: Request) -> dict:
         return _not_covered("heritage")
 
     # Quellen-Toggle frisch lesen (Env-Override-tauglich). DATA-06.
-    if not Settings().enable_denkmal:
+    if not Settings().enable_heritage:
         return {
             "data": None,
             "meta": {
@@ -2060,7 +2190,7 @@ async def city_heritage(slug: str, request: Request) -> dict:
         }
 
     client = request.app.state.resilient_client
-    key = build_cache_key("denkmal", city_slug=entry.slug)
+    key = build_cache_key("heritage", city_slug=entry.slug)
 
     async def fetch_fn():
         return await fetch_heritage(
@@ -2072,13 +2202,13 @@ async def city_heritage(slug: str, request: Request) -> dict:
             population=entry.population,
         )
 
-    raw, status = await client.fetch("denkmal", key, fetch_fn)
+    raw, status = await client.fetch("heritage", key, fetch_fn)
 
     # Pitfall 4: raw is None (toter Upstream ohne Cache) MUSS vor dem Mapper
     # geprüft werden, sonst 500. 503 mit selbst-korrigierendem Hint (DX-06).
     if raw is None:
         raise UpstreamError(
-            "Quelle 'denkmal' voruebergehend nicht erreichbar, kein gecachter "
+            "Quelle 'heritage' voruebergehend nicht erreichbar, kein gecachter "
             "Wert vorhanden.",
             hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
         )
@@ -2086,7 +2216,7 @@ async def city_heritage(slug: str, request: Request) -> dict:
     record = map_heritage(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
-    await append_record(record, source="denkmal")
+    await append_record(record, source="heritage")
 
     return {
         "data": record.model_dump(mode="json"),
@@ -2117,7 +2247,7 @@ async def city_tree_cadastre(slug: str, request: Request) -> dict:
     if not is_covered("tree-cadastre", entry.slug):
         return _not_covered("tree-cadastre")
 
-    if not Settings().enable_baumkataster:
+    if not Settings().enable_tree_cadastre:
         return {
             "data": None,
             "meta": {
@@ -2127,16 +2257,16 @@ async def city_tree_cadastre(slug: str, request: Request) -> dict:
         }
 
     client = request.app.state.resilient_client
-    key = build_cache_key("baumkataster", city_slug=entry.slug)
+    key = build_cache_key("tree_cadastre", city_slug=entry.slug)
 
     async def fetch_fn():
         return await fetch_trees(request.app.state.http, slug=entry.slug)
 
-    raw, status = await client.fetch("baumkataster", key, fetch_fn)
+    raw, status = await client.fetch("tree_cadastre", key, fetch_fn)
 
     if raw is None:
         raise UpstreamError(
-            "Quelle 'baumkataster' voruebergehend nicht erreichbar, kein "
+            "Quelle 'tree_cadastre' voruebergehend nicht erreichbar, kein "
             "gecachter Wert vorhanden.",
             hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
         )
@@ -2144,7 +2274,7 @@ async def city_tree_cadastre(slug: str, request: Request) -> dict:
     record = map_trees(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
-    await append_record(record, source="baumkataster")
+    await append_record(record, source="tree_cadastre")
 
     return {
         "data": record.model_dump(mode="json"),
@@ -2276,8 +2406,20 @@ async def city_traffic(slug: str, request: Request, response: Response) -> dict:
             hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
         )
 
+    # include=geometry-Opt-in (quick-260706-g9q): die Roh-Polyline bleibt nur auf
+    # ausdruecklichen Wunsch erhalten (Default schlank). Kanalunabhaengig (kein
+    # GPT-/MCP-Raten), gegen feste Werte gematcht (T-g9q-03: kein roher String).
+    qp = request.query_params
+    include_geometry = qp.get("include") == "geometry" or (
+        (qp.get("full") or "").strip().lower() in ("1", "true", "yes")
+    )
+
     record = map_autobahn_traffic(
-        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
+        raw,
+        retrieved_at=datetime.now(UTC),
+        ags=entry.ags,
+        wikidata_qid=entry.qid,
+        include_geometry=include_geometry,
     )
     await append_record(record, source="autobahn")
 
@@ -2304,15 +2446,15 @@ async def _bremen_road_events(entry, request: Request) -> dict:
     settings = Settings()
     cid = correlation_id.get()
     mobilithek_http = getattr(request.app.state, "mobilithek_http", None)
-    abo_id = settings.bremen_baustellen_abo_id
-    if not settings.enable_bremen_baustellen or mobilithek_http is None or not abo_id:
+    abo_id = settings.bremen_roadworks_abo_id
+    if not settings.enable_bremen_roadworks or mobilithek_http is None or not abo_id:
         return {
             "data": None,
             "meta": {"correlation_id": cid, "source_status": "disabled"},
         }
 
     client = request.app.state.resilient_client
-    key = build_cache_key("bremen_baustellen", city_slug=entry.slug)
+    key = build_cache_key("bremen_roadworks", city_slug=entry.slug)
 
     async def fetch_fn():
         return await fetch_datex2(
@@ -2324,10 +2466,10 @@ async def _bremen_road_events(entry, request: Request) -> dict:
             publication="situation",
         )
 
-    raw, status = await client.fetch("bremen_baustellen", key, fetch_fn)
+    raw, status = await client.fetch("bremen_roadworks", key, fetch_fn)
     if raw is None:
         raise UpstreamError(
-            "Quelle 'bremen_baustellen' voruebergehend nicht erreichbar, kein Cache.",
+            "Quelle 'bremen_roadworks' voruebergehend nicht erreichbar, kein Cache.",
             hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
         )
     if not raw.get("events"):
@@ -2338,7 +2480,7 @@ async def _bremen_road_events(entry, request: Request) -> dict:
     record = map_bremen_road_events(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
-    await append_record(record, source="bremen_baustellen")
+    await append_record(record, source="bremen_roadworks")
     return {
         "data": record.model_dump(mode="json"),
         "meta": {
@@ -2448,56 +2590,178 @@ async def city_road_events(slug: str, request: Request) -> dict:
     }
 
 
-# Parking-Connector-Auflösung (DATA-40, Dedup-Prinzip): EIN Parking-Endpunkt mit
-# Quellen-Fallback. Bevorzugt ParkenDD (Live-Belegung frei/gesamt, ~22 Städte,
-# Lizenz PRO STADT am Ursprung verifiziert, sonst ehrlich UNKNOWN/Tier C); für
-# München der statische CKAN-Standortkatalog (Fallback ohne Live-Belegung, Tier A
-# DL-DE/BY). Beide Adapter teilen die Signatur
-# (http, *, slug, lat, lon) und Mapper-Signatur (raw, *, retrieved_at, ags, qid).
-# Die abgedeckten Slugs (PARTIAL_COVERAGE["parking"]) leiten sich aus genau diesen
-# Quellen ab (PARKENDD_CITIES | {muenchen}); ein nicht aufgelöster Slug ist daher
-# automatisch not_covered.
-def _resolve_parking_connector(slug: str):
-    """Liefert ``(source, fetch_fn, map_fn)`` für den Parking-Endpunkt oder None."""
-    if slug in PARKENDD_CITIES:
-        return ("parkendd", fetch_parkendd, map_parkendd)
-    if slug == "muenchen":
-        return ("muenchen_parkhaeuser", fetch_muenchen_parking, map_muenchen_parking)
-    return None
+# Parking-Connector-Registry (DATA-40 / PARK-08): EINE deklarative Registry ersetzt
+# die früheren drei getrennten Parking-Auflösungspfade (ParkenDD-Städteliste,
+# Connector-Resolver, Mobilithek-Map). EIN Endpunkt je Stadt, Quelle je Stadt kuratiert.
+# ``kind`` steuert die Fetch-Signatur:
+#  - "http_direct": fetch_fn(http) (keylose Stadt-OpenData-Direktquellen)
+#  - "mobidata":    fetch_fn(http, slug=, source_uids=, lat=, lon=) (MobiData BW)
+#  - "http_geo":    fetch_fn(http, slug=, lat=, lon=) (München + ParkenDD-Übergang)
+#  - "mobilithek":  fetch_fn(mtls, abo_id=, static_abo_id=, slug=) (DATEX II mTLS)
+#  - "db_store":    Store-Lesung (kein fetch_fn/Upstream im Request-Pfad; DB BahnPark
+#                   statischer Katalog aus dem täglichen Ingest-Snapshot)
+# ``source`` ist zugleich die enable_<source>-Toggle-Basis UND das Cache-/Fassaden-
+# Quellenlabel (build_cache_key stadt-scharf, T-25-25). source_uids/abo_attr/static_attr
+# sind kind-spezifisch. Alle Werte stammen ausschließlich aus DIESER Registry (SSRF
+# T-25-23, nie User-Input).
+#
+# ParkenDD-Übergang (Owner-Entscheid 2026-07-19): nur noch dresden (heute live, keine
+# belegte Direktquelle) bleibt bis zur ParkenDD-Entfernung (25-08) über den
+# ParkenDD-Adapter bedient. koeln ist seit 2026-07-23 (quick-260723-gaq) direkt auf
+# Mobilithek DATEX II V2 umgestellt (upstream bei ParkenDD eingefroren 2021-09,
+# lieferte no_data). hamburg ist seit 2026-07-19 direkt auf den keylosen
+# geodienste.hamburg.de-WFS umgestellt (dl-de/by, Tier A). mannheim
+# (NULL-Lizenz, T-25-26) und nicht gelistete Städte haben KEINEN Eintrag -> not_covered.
+class ParkingConnector(NamedTuple):
+    source: str
+    kind: str  # "http_direct" | "mobidata" | "http_geo" | "mobilithek"
+    # Heterogene Signaturen je kind -> Callable[..., Any] statt object (die
+    # kind-Zweige unten rufen sie mit den passenden Argumenten auf). None nur
+    # bei kind=db_store (Store-Lesung ohne Upstream-Call).
+    fetch_fn: Callable[..., Any] | None
+    mapper: Callable[..., Any]
+    source_uids: tuple[str, ...] = ()
+    abo_attr: str | None = None
+    static_attr: str | None = None
 
 
-# Mobilithek-Park-Städte im UNIFIED Endpunkt (Lücken-Schluss 2026-07-02): die
-# drei mTLS-Quellen existierten bislang NUR als /live/{stadt}/parking-Routen;
-# /cities/frankfurt-am-main/parking antwortete not_covered, obwohl die Quelle
-# längst integriert war (Owner-Fund: Lücken-Matrix der Top-12). Eintrag:
-# slug -> (source, fetch_fn, abo_id-Settings-Feld, static_abo_id-Feld, mapper).
-# Die fetch_fn-Signatur (mobilithek_http, abo_id=, static_abo_id=, slug=) weicht
-# vom (http, slug, lat, lon)-Connector oben ab, daher der eigene Zweig in
-# ``city_parking`` (gleiches Muster wie Bremen-road-events). Die /live-Routen
-# bleiben als deprecated-kompatible Aliase bestehen.
-_MOBILITHEK_PARKING: dict[str, tuple[str, object, str, str, object]] = {
-    "frankfurt-am-main": (
-        SourceId.FRANKFURT_PARKING.value,
+PARKING_CONNECTORS: dict[str, ParkingConnector] = {
+    # Stadt-OpenData-Direktquellen (keylos, parameterlose http-Adapter)
+    "dortmund": ParkingConnector(
+        "dortmund_parking", "http_direct", fetch_dortmund_parking, map_dortmund_parking
+    ),
+    "aachen": ParkingConnector(
+        "aachen_parking", "http_direct", fetch_aachen_parking, map_aachen_parking
+    ),
+    "muenster": ParkingConnector(
+        "muenster_parking", "http_direct", fetch_muenster_parking, map_muenster_parking
+    ),
+    "oldenburg": ParkingConnector(
+        "oldenburg_parking",
+        "http_direct",
+        fetch_oldenburg_parking,
+        map_oldenburg_parking,
+    ),
+    "kaiserslautern": ParkingConnector(
+        "kaiserslautern_parking",
+        "http_direct",
+        fetch_kaiserslautern_parking,
+        map_kaiserslautern_parking,
+    ),
+    "karlsruhe": ParkingConnector(
+        "karlsruhe_parking",
+        "http_direct",
+        fetch_karlsruhe_parking,
+        map_karlsruhe_parking,
+    ),
+    # Hamburg: keyloser HUP-WFS (dl-de/by, umgeht den api.hamburg.de-Block)
+    "hamburg": ParkingConnector(
+        "hamburg_parking", "http_direct", fetch_hamburg_parking, map_hamburg_parking
+    ),
+    # MobiData BW ParkAPI (source_uids je Stadt, 25-02 live-verifiziert)
+    "freiburg-im-breisgau": ParkingConnector(
+        "mobidata_parkapi",
+        "mobidata",
+        fetch_mobidata_parking,
+        map_mobidata_parking,
+        source_uids=("freiburg",),
+    ),
+    "heidelberg": ParkingConnector(
+        "mobidata_parkapi",
+        "mobidata",
+        fetch_mobidata_parking,
+        map_mobidata_parking,
+        source_uids=("heidelberg",),
+    ),
+    "heilbronn": ParkingConnector(
+        "mobidata_parkapi",
+        "mobidata",
+        fetch_mobidata_parking,
+        map_mobidata_parking,
+        source_uids=("heilbronn_goldbeck",),
+    ),
+    "ulm": ParkingConnector(
+        "mobidata_parkapi",
+        "mobidata",
+        fetch_mobidata_parking,
+        map_mobidata_parking,
+        source_uids=("ulm_sensors",),
+    ),
+    # München: statischer CKAN-Standortkatalog (Fallback ohne Live-Belegung)
+    "muenchen": ParkingConnector(
+        "muenchen_parking", "http_geo", fetch_muenchen_parking, map_muenchen_parking
+    ),
+    # Mobilithek mTLS (DATEX II); Abo-gated -> disabled ohne Cert/Abo-ID
+    "frankfurt-am-main": ParkingConnector(
+        "frankfurt_parking",
+        "mobilithek",
         fetch_frankfurt_parking,
-        "frankfurt_parking_abo_id",
-        "frankfurt_parking_static_abo_id",
         map_frankfurt_parking,
+        abo_attr="frankfurt_parking_abo_id",
+        static_attr="frankfurt_parking_static_abo_id",
     ),
-    "wuppertal": (
-        SourceId.WUPPERTAL_PARKING.value,
+    "wuppertal": ParkingConnector(
+        "wuppertal_parking",
+        "mobilithek",
         fetch_wuppertal_parking,
-        "wuppertal_parking_abo_id",
-        "wuppertal_parking_static_abo_id",
         map_wuppertal_parking,
+        abo_attr="wuppertal_parking_abo_id",
+        static_attr="wuppertal_parking_static_abo_id",
     ),
-    "magdeburg": (
-        SourceId.MAGDEBURG_PARKING.value,
+    "magdeburg": ParkingConnector(
+        "magdeburg_parking",
+        "mobilithek",
         fetch_magdeburg_parking,
-        "magdeburg_parking_abo_id",
-        "magdeburg_parking_static_abo_id",
         map_magdeburg_parking,
+        abo_attr="magdeburg_parking_abo_id",
+        static_attr="magdeburg_parking_static_abo_id",
     ),
+    # koeln: seit 2026-07-23 (quick-260723-gaq) direkt Mobilithek DATEX II V2
+    # (ParkenDD-Upstream eingefroren 2021-09, lieferte no_data)
+    "koeln": ParkingConnector(
+        "koeln_parking",
+        "mobilithek",
+        fetch_koeln_parking,
+        map_koeln_parking,
+        abo_attr="koeln_parking_abo_id",
+        static_attr="koeln_parking_static_abo_id",
+    ),
+    # ParkenDD-Übergang bis 25-08 (Owner-Entscheid 2026-07-19; kein Live-Regress):
+    # nur noch dresden
+    "dresden": ParkingConnector("parkendd", "http_geo", fetch_parkendd, map_parkendd),
+    # DB BahnPark statischer Katalog (kind "db_store": Store-Lesung ohne Upstream-Call
+    # im Request-Pfad; täglicher Ingest schreibt den Snapshot). free=None (nur
+    # statische Kapazität), Tier A dl-de/by. Nur Register-Städte ohne andere Quelle.
+    **{
+        slug: ParkingConnector("db_bahnpark", "db_store", None, map_db_bahnpark)
+        for slug in (
+            "berlin",
+            "bochum",
+            "bonn",
+            "bremen",
+            "duesseldorf",
+            "duisburg",
+            "erfurt",
+            "essen",
+            "hannover",
+            "mainz",
+            "saarbruecken",
+            "schwerin",
+            "stuttgart",
+            "wiesbaden",
+        )
+    },
 }
+
+
+# Drift-Schutz (verbindlich, wie CONNECTOR_MAP/GBFS_SYSTEMS): Registry und Coverage-
+# Karte MÜSSEN deckungsgleich sein, sonst fällt eine Stadt still auf not_covered oder
+# eine Route zeigt ins Leere (T-25-24). Echtes raise (greift auch unter python -O).
+if set(PARKING_CONNECTORS) != set(PARTIAL_COVERAGE["parking"]):
+    raise RuntimeError(
+        "PARKING_CONNECTORS und PARTIAL_COVERAGE['parking'] sind divergiert: "
+        f"{set(PARKING_CONNECTORS) ^ set(PARTIAL_COVERAGE['parking'])}"
+    )
 
 
 @router.get("/cities/{slug}/parking")
@@ -2508,9 +2772,10 @@ async def city_parking(slug: str, request: Request) -> dict:
     /live/dortmund/parking ab): bevorzugt ParkenDD-Live-Belegung (frei/gesamt je
     Parkhaus, ~22 Städte keylos, Lizenz pro Stadt am Ursprung verifiziert), für
     München den statischen CKAN-Standortkatalog (Fallback ohne Live-Belegung,
-    Tier A DL-DE/BY) und für Frankfurt am Main/Wuppertal/Magdeburg die
+    Tier A DL-DE/BY) und für Frankfurt am Main/Wuppertal/Magdeburg/Köln die
     Mobilithek-mTLS-Quellen (DATEX II, statisch+dynamisch gejoint; bislang nur
-    als /live-Routen erreichbar, Lücken-Schluss 2026-07-02).
+    als /live-Routen erreichbar, Lücken-Schluss 2026-07-02; Köln seit
+    2026-07-23 direkt statt ParkenDD).
 
     Ablauf wie ``city_road_events``: Register-Lookup (404 bei unbekanntem Slug),
     Coverage-/Connector-Prüfung (nicht abgedeckt -> 200 ``not_covered`` +
@@ -2522,69 +2787,101 @@ async def city_parking(slug: str, request: Request) -> dict:
     """
     entry = get_city(slug)
 
+    conn = PARKING_CONNECTORS.get(entry.slug)
+    if conn is None:
+        return _not_covered("parking")
+
     settings = Settings()
-    fetch_fn = None
-    if entry.slug in _MOBILITHEK_PARKING:
-        # Mobilithek-Zweig (mTLS + Abo-Paar statt (http, slug, lat, lon)-Signatur).
-        source, mob_fetch, abo_attr, static_attr, map_parking = _MOBILITHEK_PARKING[
-            entry.slug
-        ]
-        mobilithek_http = getattr(request.app.state, "mobilithek_http", None)
-        abo_id = getattr(settings, abo_attr)
-        if (
-            not getattr(settings, f"enable_{source}", False)
-            or mobilithek_http is None
-            or not abo_id
-        ):
-            return {
-                "data": None,
-                "meta": {
-                    "correlation_id": correlation_id.get(),
-                    "source_status": "disabled",
-                },
-            }
+    source = conn.source
+    map_parking = conn.mapper
 
-        async def fetch_fn():
-            return await mob_fetch(
-                mobilithek_http,
-                abo_id=abo_id,
-                static_abo_id=getattr(settings, static_attr),
-                slug=entry.slug,
-            )
+    # Quellen-Toggle aus -> ehrliches disabled (200, nie 5xx).
+    if not getattr(settings, f"enable_{source}", False):
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "disabled",
+            },
+        }
+
+    if conn.kind == "db_store":
+        # Statischer Katalog (DB BahnPark): Store-Lesung, KEIN Upstream-Call im
+        # Request-Pfad (T-25-19). Snapshot aus dem Daten-Volume, sonst committeter
+        # Seed; leerer Slug -> no_data unten. Kein Cache/Breaker nötig (Datei-Read).
+        raw = {
+            "slug": entry.slug,
+            "as_of": None,
+            "facilities": load_db_bahnpark(settings.db_bahnpark_store_path).get(
+                entry.slug, []
+            ),
+        }
+        status = "STORE"
     else:
-        connector = _resolve_parking_connector(entry.slug)
-        if connector is None:
-            return _not_covered("parking")
-        source, fetch_parking, map_parking = connector
+        http = request.app.state.http
+        fetch_upstream = conn.fetch_fn
+        if fetch_upstream is None:
+            # Nie erreichbar: fetch_fn=None gibt es nur bei kind=db_store, und der
+            # ist oben bedient. Guard fuer die statische Optional-Kette (pyright).
+            raise RuntimeError(f"Connector {source} ohne fetch_fn")
+        if conn.kind == "mobilithek":
+            # mTLS + Abo-Paar; ohne Cert/Abo-ID ehrlich disabled (Graceful Degrade).
+            mobilithek_http = getattr(request.app.state, "mobilithek_http", None)
+            # abo_attr/static_attr sind bei kind=mobilithek in der Registry immer
+            # gesetzt; der None-Zweig existiert fuer die Optional-Kette.
+            abo_id = getattr(settings, conn.abo_attr) if conn.abo_attr else None
+            if mobilithek_http is None or not abo_id:
+                return {
+                    "data": None,
+                    "meta": {
+                        "correlation_id": correlation_id.get(),
+                        "source_status": "disabled",
+                    },
+                }
 
-        if not getattr(settings, f"enable_{source}"):
-            return {
-                "data": None,
-                "meta": {
-                    "correlation_id": correlation_id.get(),
-                    "source_status": "disabled",
-                },
-            }
+            async def fetch_fn():
+                return await fetch_upstream(
+                    mobilithek_http,
+                    abo_id=abo_id,
+                    static_abo_id=(
+                        getattr(settings, conn.static_attr)
+                        if conn.static_attr
+                        else None
+                    ),
+                    slug=entry.slug,
+                )
+        elif conn.kind == "mobidata":
 
-        async def fetch_fn():
-            return await fetch_parking(
-                request.app.state.http,
-                slug=entry.slug,
-                lat=entry.geo.lat,
-                lon=entry.geo.lon,
+            async def fetch_fn():
+                return await fetch_upstream(
+                    http,
+                    slug=entry.slug,
+                    source_uids=list(conn.source_uids),
+                    lat=entry.geo.lat,
+                    lon=entry.geo.lon,
+                )
+        elif conn.kind == "http_geo":
+
+            async def fetch_fn():
+                return await fetch_upstream(
+                    http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
+                )
+        else:  # http_direct: keyloser parameterloser Adapter
+
+            async def fetch_fn():
+                return await fetch_upstream(http)
+
+        client = request.app.state.resilient_client
+        key = build_cache_key(source, city_slug=entry.slug)
+
+        raw, status = await client.fetch(source, key, fetch_fn)
+
+        if raw is None:
+            raise UpstreamError(
+                f"Quelle '{source}' voruebergehend nicht erreichbar, kein gecachter "
+                "Wert vorhanden.",
+                hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
             )
-
-    client = request.app.state.resilient_client
-    key = build_cache_key(source, city_slug=entry.slug)
-
-    raw, status = await client.fetch(source, key, fetch_fn)
-
-    if raw is None:
-        raise UpstreamError(
-            f"Quelle '{source}' voruebergehend nicht erreichbar, kein gecachter "
-            "Wert vorhanden.",
-            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
-        )
 
     # Quelle erreichbar, aber kein Parkhaus -> ehrliches no_data (200).
     if not raw.get("facilities"):
@@ -2610,7 +2907,7 @@ async def city_parking(slug: str, request: Request) -> dict:
     }
 
 
-# eRound-Ladebelegung (DATA-42): Cap der Einzelpunkt-Liste (Muster denkmal
+# eRound-Ladebelegung (DATA-42): Cap der Einzelpunkt-Liste (Muster heritage
 # _COUNT_CAP). Hamburg hat ~2700 Ladepunkte; ``status_counts`` zählt IMMER alle
 # gemeldeten Punkte, nur die points-Liste wird gekappt (``truncated`` ehrlich).
 _CHARGING_STATUS_POINTS_CAP = 500
@@ -2712,9 +3009,9 @@ async def city_charging_status(slug: str, request: Request) -> dict:
 # slug -> (source, fetch_factory(http, entry) -> raw, mapper). Die fetch_factory
 # kapselt die je Quelle leicht abweichende Adapter-Signatur (z.B. München braucht
 # das Jahr für das CKAN-Paket). Nicht aufgelöster Slug -> not_covered.
-async def _fetch_muenchen_radzaehl(http, entry) -> dict:
+async def _fetch_muenchen_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Muenchen: injiziert das aktuelle Jahr (CKAN-Jahres-Paket)."""
-    return await fetch_muenchen_radzaehl(
+    return await fetch_muenchen_bike_counts(
         http,
         slug=entry.slug,
         lat=entry.geo.lat,
@@ -2723,51 +3020,51 @@ async def _fetch_muenchen_radzaehl(http, entry) -> dict:
     )
 
 
-async def _fetch_leipzig_radzaehl(http, entry) -> dict:
+async def _fetch_leipzig_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Leipzig (Standard-Signatur)."""
-    return await fetch_leipzig_radzaehl(
+    return await fetch_leipzig_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_hamburg_radzaehl(http, entry) -> dict:
+async def _fetch_hamburg_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Hamburg (Standard-Signatur)."""
-    return await fetch_hamburg_radzaehl(
+    return await fetch_hamburg_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_berlin_radzaehl(http, entry) -> dict:
+async def _fetch_berlin_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Berlin (Standard-Signatur)."""
-    return await fetch_berlin_radzaehl(
+    return await fetch_berlin_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_stuttgart_radzaehl(http, entry) -> dict:
+async def _fetch_stuttgart_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Stuttgart (Standard-Signatur)."""
-    return await fetch_stuttgart_radzaehl(
+    return await fetch_stuttgart_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_koeln_radzaehl(http, entry) -> dict:
+async def _fetch_koeln_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Köln (Standard-Signatur)."""
-    return await fetch_koeln_radzaehl(
+    return await fetch_koeln_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_essen_radzaehl(http, entry) -> dict:
+async def _fetch_essen_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Essen (Standard-Signatur)."""
-    return await fetch_essen_radzaehl(
+    return await fetch_essen_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
 
-async def _fetch_duesseldorf_radzaehl(http, entry) -> dict:
+async def _fetch_duesseldorf_bike_counts(http, entry) -> dict:
     """Adapter-Wrapper Düsseldorf (Standard-Signatur)."""
-    return await fetch_duesseldorf_radzaehl(
+    return await fetch_duesseldorf_bike_counts(
         http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
     )
 
@@ -2775,28 +3072,40 @@ async def _fetch_duesseldorf_radzaehl(http, entry) -> dict:
 def _resolve_bike_counts_connector(slug: str):
     """Liefert ``(source, fetch_factory, map_fn)`` für bike-counts oder None."""
     if slug == "muenchen":
-        return ("muenchen_radzaehl", _fetch_muenchen_radzaehl, map_muenchen_radzaehl)
+        return (
+            "muenchen_bike_counts",
+            _fetch_muenchen_bike_counts,
+            map_muenchen_bike_counts,
+        )
     if slug == "leipzig":
-        return ("leipzig_radzaehl", _fetch_leipzig_radzaehl, map_leipzig_radzaehl)
+        return (
+            "leipzig_bike_counts",
+            _fetch_leipzig_bike_counts,
+            map_leipzig_bike_counts,
+        )
     if slug == "hamburg":
-        return ("hamburg_radzaehl", _fetch_hamburg_radzaehl, map_hamburg_radzaehl)
+        return (
+            "hamburg_bike_counts",
+            _fetch_hamburg_bike_counts,
+            map_hamburg_bike_counts,
+        )
     if slug == "berlin":
-        return ("berlin_radzaehl", _fetch_berlin_radzaehl, map_berlin_radzaehl)
+        return ("berlin_bike_counts", _fetch_berlin_bike_counts, map_berlin_bike_counts)
     if slug == "stuttgart":
         return (
-            "stuttgart_radzaehl",
-            _fetch_stuttgart_radzaehl,
-            map_stuttgart_radzaehl,
+            "stuttgart_bike_counts",
+            _fetch_stuttgart_bike_counts,
+            map_stuttgart_bike_counts,
         )
     if slug == "koeln":
-        return ("koeln_radzaehl", _fetch_koeln_radzaehl, map_koeln_radzaehl)
+        return ("koeln_bike_counts", _fetch_koeln_bike_counts, map_koeln_bike_counts)
     if slug == "essen":
-        return ("essen_radzaehl", _fetch_essen_radzaehl, map_essen_radzaehl)
+        return ("essen_bike_counts", _fetch_essen_bike_counts, map_essen_bike_counts)
     if slug == "duesseldorf":
         return (
-            "duesseldorf_radzaehl",
-            _fetch_duesseldorf_radzaehl,
-            map_duesseldorf_radzaehl,
+            "duesseldorf_bike_counts",
+            _fetch_duesseldorf_bike_counts,
+            map_duesseldorf_bike_counts,
         )
     return None
 
@@ -2887,7 +3196,7 @@ async def city_office_wait_times(slug: str, request: Request) -> dict:
     if not is_covered("office-wait-times", entry.slug):
         return _not_covered("office-wait-times")
 
-    source = SourceId.KOELN_WARTEZEITEN.value
+    source = SourceId.KOELN_WAIT_TIMES.value
     if not getattr(Settings(), f"enable_{source}"):
         return {
             "data": None,
@@ -2901,7 +3210,7 @@ async def city_office_wait_times(slug: str, request: Request) -> dict:
     key = build_cache_key(source, city_slug=entry.slug)
 
     async def fetch_fn():
-        return await fetch_koeln_wartezeiten(request.app.state.http)
+        return await fetch_koeln_wait_times(request.app.state.http)
 
     raw, status = await client.fetch(source, key, fetch_fn)
 
@@ -2922,7 +3231,7 @@ async def city_office_wait_times(slug: str, request: Request) -> dict:
             },
         }
 
-    record = map_koeln_wartezeiten(
+    record = map_koeln_wait_times(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
 
@@ -2934,6 +3243,183 @@ async def city_office_wait_times(slug: str, request: Request) -> dict:
             "cache_status": status,
         },
     }
+
+
+# --------------------------------------------------------------------------- #
+# Quick-260729-muc: ruhender Verkehr Muenchen (drei Datenarten)                #
+# --------------------------------------------------------------------------- #
+# Alle drei folgen demselben Ablauf wie ``city_office_wait_times`` (Register-
+# Lookup, Coverage-Pruefung, Toggle-Guard, resilienter Fetch, Mapping) und teilen
+# ihn deshalb ueber diesen Helfer, statt ihn dreimal zu wiederholen. Reine
+# Stammdaten der Landeshauptstadt Muenchen: KEIN Archiv-Write, keine
+# Live-Belegung (die veroeffentlicht Muenchen nicht offen, Stand 2026-07-29).
+async def _muenchen_ruhver_resource(
+    slug: str,
+    request: Request,
+    *,
+    resource: str,
+    source_id: SourceId,
+    fetch,
+    mapper,
+    data_keys: tuple[str, ...],
+) -> dict:
+    """Liefert eine Muenchner Ruhender-Verkehr-Datenart im kanonischen Envelope.
+
+    ``resource`` ist der Katalog-Key (Coverage + not_covered-Hinweis),
+    ``source_id`` traegt Toggle-Name und Cache-Key, ``data_keys`` nennt die
+    Roh-Listen, die ueber "Daten vorhanden" entscheiden: sind alle leer, ist die
+    Antwort ein ehrliches ``no_data`` (200) statt eines leeren Payloads.
+
+    Unbekannter Slug -> 404 (zentraler Handler), Stadt ohne Abdeckung -> 200
+    ``not_covered`` samt ``covered_cities``, Quelle abgeschaltet -> 200
+    ``disabled``, toter Upstream ohne Cache -> 503 mit selbst-korrigierendem Hint.
+    """
+    entry = get_city(slug)
+
+    if not is_covered(resource, entry.slug):
+        return _not_covered(resource)
+
+    source = source_id.value
+    if not getattr(Settings(), f"enable_{source}"):
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "disabled",
+            },
+        }
+
+    client = request.app.state.resilient_client
+    key = build_cache_key(source, city_slug=entry.slug)
+
+    async def fetch_fn():
+        return await fetch(
+            request.app.state.http,
+            slug=entry.slug,
+            lat=entry.geo.lat,
+            lon=entry.geo.lon,
+        )
+
+    raw, status = await client.fetch(source, key, fetch_fn)
+
+    if raw is None:
+        raise UpstreamError(
+            f"Quelle '{source}' voruebergehend nicht erreichbar, kein gecachter "
+            "Wert vorhanden.",
+            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
+        )
+
+    # Quelle erreichbar, aber alle Listen leer -> ehrliches no_data (200).
+    if not any(raw.get(k) for k in data_keys):
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "no_data",
+            },
+        }
+
+    record = mapper(
+        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
+    )
+
+    return {
+        "data": record.model_dump(mode="json"),
+        "meta": {
+            "correlation_id": correlation_id.get(),
+            "source_status": "ok",
+            "cache_status": status,
+        },
+    }
+
+
+@router.get("/cities/{slug}/parking-onstreet")
+async def city_parking_onstreet(slug: str, request: Request) -> dict:
+    """Liefert den bewirtschafteten Strassenparkraum je Stadt (Quick-muc).
+
+    Parkseiten (Strassenabschnitte mit Stellplatzanzahl und Parkregelung),
+    Parkraummanagementgebiete, Behindertenparkplaetze und Halteflaechen zum
+    Laden, Liefern, Leisten. Aktuell NUR Muenchen abgedeckt (vier keylose
+    WFS-Layer des Mobilitaetsreferats, DL-DE/BY 2.0, Tier A). Ausgeliefert werden
+    Gesamtsummen plus drei Aggregate (je Parkregelung, je Strasse, je Gebiet),
+    nicht die fuenfstellige Rohsegment-Liste.
+    """
+    return await _muenchen_ruhver_resource(
+        slug,
+        request,
+        resource="parking-onstreet",
+        source_id=SourceId.MUENCHEN_PARKING_ONSTREET,
+        fetch=fetch_muenchen_parking_onstreet,
+        mapper=map_muenchen_parking_onstreet,
+        data_keys=("segments", "zones", "accessible", "loading"),
+    )
+
+
+@router.get("/cities/{slug}/park-and-ride")
+async def city_park_and_ride(slug: str, request: Request) -> dict:
+    """Liefert P+R- und B+R-Anlagen je Stadt (Quick-muc).
+
+    Stellplatzzahlen, Bauform, Einfahrtshoehe, Preise, OePNV-Anbindung und die
+    Belegungsprognose je Tagesart und Zeitscheibe. Aktuell NUR Muenchen abgedeckt
+    (drei keylose CKAN-Pakete der P+R Park & Ride GmbH Muenchen, DL-DE/BY 2.0,
+    Tier A). Die Prognose stammt aus historischen Erfahrungswerten und ist KEINE
+    Echtzeit-Belegung.
+    """
+    return await _muenchen_ruhver_resource(
+        slug,
+        request,
+        resource="park-and-ride",
+        source_id=SourceId.MUENCHEN_PARK_AND_RIDE,
+        fetch=fetch_muenchen_park_and_ride,
+        mapper=map_muenchen_park_and_ride,
+        data_keys=("car_rows", "bike_rows"),
+    )
+
+
+@router.get("/cities/{slug}/mobility-points")
+async def city_mobility_points(slug: str, request: Request) -> dict:
+    """Liefert Mobilitaetspunkte und Carsharing-Parkflaechen je Stadt (Quick-muc).
+
+    Je Mobilitaetspunkt die gebuendelten Angebote (Carsharing-Stellplaetze,
+    Ladepunkte, Abstellflaechen fuer geteilte Mikromobilitaet, Radservice,
+    OePNV-Anbindung) plus die allgemeinen und stationsbasierten
+    Carsharing-Parkflaechen. Aktuell NUR Muenchen abgedeckt (drei keylose
+    WFS-Layer des Mobilitaetsreferats, DL-DE/BY 2.0, Tier A).
+    """
+    return await _muenchen_ruhver_resource(
+        slug,
+        request,
+        resource="mobility-points",
+        source_id=SourceId.MUENCHEN_MOBILITY_POINTS,
+        fetch=fetch_muenchen_mobility_points,
+        mapper=map_muenchen_mobility_points,
+        data_keys=("points", "carsharing_general", "carsharing_station"),
+    )
+
+
+@router.get("/cities/{slug}/bike-parking")
+async def city_bike_parking(slug: str, request: Request) -> dict:
+    """Liefert Radabstellanlagen je Stadt (Quick-mrp).
+
+    Bestand an Fahrrad- und Lastenradabstellanlagen mit Stellplatzsumme, Bauform,
+    Ueberdachung, Doppelstock, Beleuchtung, zeitlicher Begrenzung und
+    Bike-and-Ride-Kennzeichnung, dazu die zwanzig groessten Standorte. Aktuell NUR
+    Muenchen abgedeckt (zwei keylose WFS-Layer des Mobilitaetsreferats,
+    DL-DE/BY 2.0, Tier A).
+
+    Gezaehlt wird ausschliesslich der BESTAND. Geplante, abgebaute und ausser
+    Betrieb genommene Anlagen fuehrt die Quelle im selben Layer; sie stehen als
+    eigene Zahlen in der Antwort, gehen aber nicht in die Stellplatzsumme ein.
+    """
+    return await _muenchen_ruhver_resource(
+        slug,
+        request,
+        resource="bike-parking",
+        source_id=SourceId.MUENCHEN_BIKE_PARKING,
+        fetch=fetch_muenchen_bike_parking,
+        mapper=map_muenchen_bike_parking,
+        data_keys=("bike", "cargo"),
+    )
 
 
 @router.get("/cities/{slug}/events")
@@ -3104,7 +3590,12 @@ async def city_events(slug: str, request: Request) -> dict:
     for r in meta["records"]:
         events = r.get("payload", {}).get("events")
         if isinstance(events, list):
-            r["payload"]["events"] = events[p.offset : p.offset + p.limit]
+            # Vollausgabe (p.limit None: REST-Default / limit=all) -> nur ab offset
+            # schneiden, kein oberes Limit (``offset + None`` waere ein Typfehler).
+            if p.limit is None:
+                r["payload"]["events"] = events[p.offset :]
+            else:
+                r["payload"]["events"] = events[p.offset : p.offset + p.limit]
     return {"data": data, "meta": meta}
 
 
@@ -3196,8 +3687,54 @@ async def city_webcams(slug: str, request: Request, response: Response) -> dict:
     }
 
 
+def _transit_haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Grosskreis-Distanz in km zwischen zwei WGS84-Punkten (rein, deterministisch).
+
+    Lokaler Nachbau des Vorbilds ``_haversine_km`` aus adapters/destination_one.py
+    (die private Funktion wird bewusst NICHT importiert, um keine Modul-Kopplung
+    quer durch die Codebasis zu ziehen).
+    """
+    earth_km = 6371.0088
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    )
+    return 2 * earth_km * math.asin(math.sqrt(a))
+
+
+def _parse_near_param(raw: str) -> tuple[float, float]:
+    """Parst ``near="lat,lon"`` zu (lat, lon) mit WGS84-Bounds-Pruefung.
+
+    Fehlerhaftes Format ODER Werte ausserhalb lat[-90,90]/lon[-180,180] ->
+    ``ValidationFailedError`` (400 invalid_request), BEVOR gerechnet wird
+    (T-eqr-VAL). Kein roher User-String erreicht die Distanz-Rechnung.
+    """
+    hint = "Erwartet: near=lat,lon (z.B. near=52.52,13.405)."
+    parts = raw.split(",", 1)
+    if len(parts) != 2:
+        raise ValidationFailedError(
+            f"Ungueltiger Wert fuer 'near': '{raw}'.", hint=hint
+        )
+    try:
+        lat = float(parts[0])
+        lon = float(parts[1])
+    except (TypeError, ValueError):
+        raise ValidationFailedError(
+            f"Ungueltiger Wert fuer 'near': '{raw}'.", hint=hint
+        ) from None
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        raise ValidationFailedError(
+            f"Koordinaten ausserhalb des gueltigen Bereichs: '{raw}'.",
+            hint="lat in [-90,90], lon in [-180,180].",
+        )
+    return lat, lon
+
+
 @router.get("/cities/{slug}/transit")
-async def city_transit(slug: str) -> dict:
+async def city_transit(slug: str, request: Request) -> dict:
     """Liefert vorverarbeitete ÖPNV-Haltestellen im kanonischen Envelope (DATA-05).
 
     Ablauf (DATA-05/06, API-01, GOV-02): Register-Lookup (unbekannter Slug -> 404
@@ -3215,6 +3752,17 @@ async def city_transit(slug: str) -> dict:
       ``read_stops`` liefert []) -> data leer, KEIN 5xx
     - ``ok``: vorverarbeitete Stops vorhanden -> data nicht leer, je Element
       Attribution + license_id
+
+    Suche/Filter/Paginierung (Paket 260706-eqr), damit man eine Haltestelle
+    gezielt findet statt die Vollliste (Berlin ~6,7 MB) zu ziehen:
+    - ``?q=alsterdorf``: case-insensitive Substring-Filter auf ``stop_name``
+      (reiner Python-``in``, KEIN Regex/eval aus User-String, T-eqr-INJ).
+    - ``?near=lat,lon`` (+ optional ``?radius_m``, Default 1000): nur Stops im
+      Umkreis, aufsteigend nach Distanz; Muell/Out-of-Bounds -> 400 (T-eqr-VAL).
+    - Default (ohne q/near): erste Seite ueber ``parse_page_params`` (Default 50,
+      Cap 200); ``meta.pagination`` weist total/returned/limit/offset/truncated
+      ehrlich aus (No silent caps). ``source_status`` haengt am Vorhandensein
+      eines Snapshots (VOR dem Filter), nicht am Filter-Ergebnis.
     """
     entry = get_city(slug)
 
@@ -3237,13 +3785,60 @@ async def city_transit(slug: str) -> dict:
         if enabled:
             records.extend(read_stops(entry.slug, source=source))
 
+    # Snapshot-Status VOR dem Filtern ermitteln: "ok", sobald ueberhaupt ein
+    # Snapshot existierte (auch wenn q/near danach 0 Treffer liefert), sonst
+    # "not_ingested". So bleibt eine leere Trefferliste ehrlich "ok".
     status = "ok" if records else "not_ingested"
 
+    # 1. q-Filter: case-insensitive Substring auf stop_name (reiner Python-`in`,
+    #    KEIN eval/Regex-aus-User-String, T-eqr-INJ).
+    q = request.query_params.get("q")
+    if q and q.strip():
+        needle = q.strip().lower()
+        records = [r for r in records if needle in r.payload.stop_name.lower()]
+
+    # 2. near-Filter: nur Stops im Umkreis, aufsteigend nach Distanz. Parsing +
+    #    Bounds-Pruefung (T-eqr-VAL) BEVOR gerechnet wird; radius_m ueber denselben
+    #    Validierungsstil wie parse_page_params (nicht-numerisch/<1 -> 400).
+    near = request.query_params.get("near")
+    if near is not None:
+        near_lat, near_lon = _parse_near_param(near)
+        radius_m = _parse_int_param(
+            request.query_params.get("radius_m"),
+            name="radius_m",
+            minimum=1,
+            default=1000,
+        )
+        radius_km = radius_m / 1000
+        with_dist: list[tuple[float, object]] = []
+        for r in records:
+            if r.geo is None:
+                continue  # Stops ohne Koordinate koennen nicht verortet werden.
+            dist = _transit_haversine_km(near_lat, near_lon, r.geo.lat, r.geo.lon)
+            if dist <= radius_km:
+                with_dist.append((dist, r))
+        with_dist.sort(key=lambda t: t[0])
+        records = [r for _, r in with_dist]
+
+    # 3. Paginierung auf der CanonicalRecord-Liste. paginate_envelope passt NICHT
+    #    (data ist hier eine flache Record-Liste, kein payload-Envelope), daher
+    #    paginate() + meta.pagination MANUELL in identischer Form setzen.
+    p = parse_page_params(request)
+    total = len(records)
+    page = paginate(records, p, sort_whitelist=set())
+
     return {
-        "data": [r.model_dump(mode="json") for r in records],
+        "data": [r.model_dump(mode="json") for r in page],
         "meta": {
             "correlation_id": correlation_id.get(),
             "source_status": status,
+            "pagination": {
+                "total": total,
+                "returned": len(page),
+                "limit": p.limit,
+                "offset": p.offset,
+                "truncated": p.offset + len(page) < total,
+            },
         },
     }
 
@@ -3364,7 +3959,7 @@ async def city_holidays(slug: str) -> dict:
     404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
     (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein
     Seed-Read über ``load_holidays(entry.state, jahr)`` aus den eingebetteten
-    Seeds ``data/seeds/feiertage_<jahr>.json`` + ``schulferien_<jahr>.json``.
+    Seeds ``data/seeds/holidays_<jahr>.json`` + ``schulferien_<jahr>.json``.
 
     KRITISCH (kein Upstream im Request-Pfad, T-08-DEP): Diese Route liest
     AUSSCHLIESSLICH aus den committeten statischen Seeds via stdlib ``json``,
@@ -3375,7 +3970,7 @@ async def city_holidays(slug: str) -> dict:
     statisch im Repo (kein DB-Schutzrecht).
 
     Drei ``source_status``-Werte:
-    - ``disabled``: ``enable_feiertage`` per Env-Toggle aus -> data None
+    - ``disabled``: ``enable_holidays`` per Env-Toggle aus -> data None
     - ``no_data``: Quelle aktiv, aber keine Seed-Einträge für Bundesland/Jahr
       (z. B. fehlende Datei) -> data None, KEIN 5xx (ehrlich)
     - ``ok``: Seed-Einträge vorhanden -> holiday-Payload je entry.state mit
@@ -3386,7 +3981,7 @@ async def city_holidays(slug: str) -> dict:
     # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
     # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled, nie 5xx.
     s = Settings()
-    if not s.enable_feiertage:
+    if not s.enable_holidays:
         return {
             "data": None,
             "meta": {
@@ -3741,6 +4336,258 @@ async def city_indicators(slug: str, request: Request) -> dict:
             "source_status": "ok",
         },
     }
+
+
+# Jahresspanne, die der Wegweiser-Bestand ueberhaupt kennt: Ist-Daten ab 2006,
+# Bevoelkerungsprognosen bis 2040. Grenzen fuer die ?from=/?to=-Validierung.
+_WEGWEISER_MIN_YEAR = 2006
+_WEGWEISER_MAX_YEAR = 2040
+
+
+def _wegweiser_year(request: Request, name: str) -> int | None:
+    """Liest ``from``/``to`` aus der Query und validiert streng (Zero-Trust, #5).
+
+    Erlaubt sind vier Ziffern in einem Bereich, den die Quelle überhaupt kennt
+    (2006 bis 2040). Alles andere ist ein Eingabefehler und wird zu 400
+    gemappt, statt still ein leeres Ergebnis zu liefern: ``?from=zwanzig`` als
+    "keine Daten" auszugeben wäre irreführend.
+    """
+    raw = request.query_params.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        year = int(raw)
+    except ValueError:
+        raise ValidationFailedError(
+            f"Parameter '{name}' muss eine Jahreszahl sein (z.B. 2020)."
+        ) from None
+    if not (_WEGWEISER_MIN_YEAR <= year <= _WEGWEISER_MAX_YEAR):
+        raise ValidationFailedError(
+            f"Parameter '{name}' liegt ausserhalb des Bestands "
+            f"({_WEGWEISER_MIN_YEAR} bis {_WEGWEISER_MAX_YEAR})."
+        )
+    return year
+
+
+async def _wegweiser_dataset(slug: str, dataset: str, request: Request) -> dict:
+    """Gemeinsamer Handler für alle Datenarten aus dem Wegweiser-Bulk (CC0).
+
+    Bewusst EIN Handler statt einer Kopie je Datenart: die Datenarten
+    unterscheiden sich ausschließlich in der Themen-Auswahl aus
+    ``mappers.wegweiser.TOPIC_TO_DATASET``. Eine weitere Datenart ist damit ein
+    Registry-Eintrag plus eine dreizeilige Route, kein neuer Handler.
+
+    Optional grenzen ``?from=`` und ``?to=`` die Zeitreihe ein (beide inklusive).
+    Ohne sie kommt die volle Reihe, damit bestehende Clients unverändert
+    weiterlaufen. Für die großen Datenarten ist der Filter praktisch nötig:
+    ``population-structure`` wiegt ungefiltert rund 90 KB, mit ``?from=2023``
+    einen Bruchteil davon.
+
+    Ablauf wie ``city_indicators`` (Store-read, KEIN resilient_client):
+    Register-Lookup (unbekannt -> 404), Toggle-Prüfung (aus -> 200 disabled),
+    parametrisierter Read über ``read_series`` aus dem Bulk. Drei
+    ``source_status``:
+    - ``disabled``: ``enable_wegweiser`` per Env-Toggle aus -> data None
+    - ``not_ingested``: kein Snapshot für diese Stadt/Datenart -> data None,
+      kein 5xx (gilt auch für die kreisangehörigen Städte, denen die Quelle
+      einen Teil der Indikatoren nicht gemeindescharf liefert, und für ein
+      Jahresfenster, in dem diese Stadt keine Werte hat)
+    - ``ok``: gemappter indicator_series-Payload mit Zeitreihe je Indikator
+
+    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
+    vorverarbeiteten Datensatz; der Wegweiser-Zug läuft offline als Jahresbatch.
+    """
+    entry = get_city(slug)
+    year_from = _wegweiser_year(request, "from")
+    year_to = _wegweiser_year(request, "to")
+    if year_from is not None and year_to is not None and year_from > year_to:
+        raise ValidationFailedError(
+            "Parameter 'from' darf nicht groesser als 'to' sein."
+        )
+
+    if not Settings().enable_wegweiser:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "disabled",
+            },
+        }
+
+    rows = read_series(
+        entry.slug,
+        ags=entry.ags,
+        indicators=dataset_indicators(dataset),
+        year_from=year_from,
+        year_to=year_to,
+    )
+    if not rows:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "not_ingested",
+            },
+        }
+
+    record = map_indicator_series(
+        entry.slug,
+        rows,
+        dataset=dataset,
+        retrieved_at=datetime.now(UTC),
+        ags=entry.ags,
+        wikidata_qid=entry.qid,
+    )
+    await append_record(record, source="wegweiser")
+
+    return {
+        "data": record.model_dump(mode="json"),
+        "meta": {
+            "correlation_id": correlation_id.get(),
+            "source_status": "ok",
+        },
+    }
+
+
+@router.get("/cities/{slug}/sustainability")
+async def city_sustainability(slug: str, request: Request) -> dict:
+    """Liefert die Nachhaltigkeits-/SDG-Indikatoren je Stadt als Zeitreihe.
+
+    53 Indikatoren aus dem Wegweiser Kommune (Bertelsmann Stiftung, CC0) zu den
+    UN-Nachhaltigkeitszielen auf kommunaler Ebene: Flächeninanspruchnahme,
+    Naherholungsflächen, erneuerbare Energie im Wohnungsneubau,
+    Breitbandversorgung, Beschäftigung, Bildung, soziale Teilhabe und weitere.
+    Jahresdaten, in der Regel 2006 bis 2023, je Indikator mit voller Reihe.
+    Optional per ``?from=``/``?to=`` auf ein Jahresfenster eingrenzbar.
+    """
+    return await _wegweiser_dataset(slug, "sustainability", request)
+
+
+@router.get("/cities/{slug}/population-structure")
+async def city_population_structure(slug: str, request: Request) -> dict:
+    """Altersaufbau der Stadt als Zeitreihe (Wegweiser Kommune, CC0).
+
+    110 Indikatoren zum Ist-Zustand der Bevölkerung: Zahl und Anteil je
+    Altersgruppe (von 0-2 bis ab 80), getrennt nach Geschlecht, nach
+    Generationen, dazu Altenquotient und Jugendquotient. Ist-Daten ab 2006,
+    Prognosewerte bis 2040.
+
+    HINWEIS zur Größe: ungefiltert wiegt die Antwort rund 90 KB. Für einen
+    einzelnen Stand lohnt ``?from=2023&to=2023``, für einen Verlauf reicht meist
+    ein Ausschnitt wie ``?from=2015``.
+    """
+    return await _wegweiser_dataset(slug, "population-structure", request)
+
+
+@router.get("/cities/{slug}/population-trend")
+async def city_population_trend(slug: str, request: Request) -> dict:
+    """Veränderung des Altersaufbaus als Zeitreihe (Wegweiser Kommune, CC0).
+
+    70 Indikatoren zur Bewegung statt zum Bestand: Entwicklung der Altersgruppen
+    (absolut und seit 2011, auch nach Geschlecht), Geburten- und Sterberate,
+    Wanderungssaldo, Gesamtbevölkerungsentwicklung. Ergänzt
+    ``population-structure`` um die Frage, wohin sich die Stadt bewegt.
+    """
+    return await _wegweiser_dataset(slug, "population-trend", request)
+
+
+@router.get("/cities/{slug}/municipal-finance")
+async def city_municipal_finance(slug: str, request: Request) -> dict:
+    """Kommunale Finanzkennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
+
+    30 Indikatoren: Hebesätze für Gewerbe- und Grundsteuer, Steuereinnahmekraft,
+    kommunale Schulden, Investitionen, Personal- und Sozialausgaben je
+    Einwohner. Jahreswerte ab 2006.
+
+    ABGRENZUNG: ``tax-rates`` (Regionalstatistik) bleibt die aktuellere Quelle
+    für die reinen Hebesätze (Stichtag 2024-12-31 gegen 2023 hier). Diese
+    Datenart liefert dafür die HISTORIE und den finanziellen Gesamtzusammenhang.
+    """
+    return await _wegweiser_dataset(slug, "municipal-finance", request)
+
+
+@router.get("/cities/{slug}/labour-market")
+async def city_labour_market(slug: str, request: Request) -> dict:
+    """Arbeitsmarkt und Pendlerverflechtung als Zeitreihe (Wegweiser, CC0).
+
+    40 Indikatoren: Arbeitslosenquoten (gesamt, Jugendliche, Langzeit,
+    Ausländer), Beschäftigungsquoten nach Alter und Geschlecht, geringfügige
+    Beschäftigung, Hochqualifizierte, Ein- und Auspendler.
+
+    ABGRENZUNG: ``unemployment`` (GENESIS, Berichtsjahr 2025) bleibt die
+    aktuellere Quelle für die reine Arbeitslosenzahl, ``indicators``
+    (INKAR/BBSR) führt eigene Kennzahlen mit anderer Methodik. Hier steht der
+    Verlauf ab 2006.
+    """
+    return await _wegweiser_dataset(slug, "labour-market", request)
+
+
+@router.get("/cities/{slug}/integration")
+async def city_integration(slug: str, request: Request) -> dict:
+    """Integrationskennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
+
+    26 Indikatoren zur Lage von Menschen mit ausländischer Staatsangehörigkeit
+    und Migrationshintergrund: Bevölkerungsanteile, Beschäftigung,
+    Arbeitslosigkeit, Kinderbetreuung, Schulabschlüsse, Einbürgerungen.
+    Jahreswerte ab 2006.
+    """
+    return await _wegweiser_dataset(slug, "integration", request)
+
+
+@router.get("/cities/{slug}/childcare")
+async def city_childcare(slug: str, request: Request) -> dict:
+    """Kinderbetreuung als Zeitreihe (Wegweiser Kommune, CC0).
+
+    20 Indikatoren: Betreuungsquoten für unter Dreijährige, 3- bis 5-Jährige und
+    Schulkinder, getrennt nach Tageseinrichtung und Tagespflege sowie nach
+    Betreuungsumfang (bis 25 h, 25 bis 35 h, mehr als 35 h), dazu Kinder mit
+    Migrationshintergrund in Tageseinrichtungen. Jahreswerte ab 2006.
+
+    Teilabdeckung: 83 der 84 Städte (Reutlingen fehlt in der Quelle).
+    """
+    return await _wegweiser_dataset(slug, "childcare", request)
+
+
+@router.get("/cities/{slug}/education-stats")
+async def city_education_stats(slug: str, request: Request) -> dict:
+    """Bildungsstatistik als Zeitreihe (Wegweiser Kommune, CC0).
+
+    33 Indikatoren: Schulabgänger nach Abschlussart (ohne Abschluss bis
+    Hochschulreife), Übergangsquoten, Auszubildende, Ausbildungsplätze,
+    Weiterbildungsbeteiligung. Jahreswerte ab 2006.
+
+    NICHT zu verwechseln mit ``education``: dort liegen OSM-Schulstandorte als
+    POIs mit Koordinaten, hier die amtliche Statistik.
+
+    Teilabdeckung: 70 Städte. Die 14 kreisangehörigen Städte (Hannover, Aachen,
+    Göttingen, ...) fehlen, weil die Quelle Bildungsdaten erst ab Kreisebene
+    führt.
+    """
+    return await _wegweiser_dataset(slug, "education-stats", request)
+
+
+@router.get("/cities/{slug}/social-situation")
+async def city_social_situation(slug: str, request: Request) -> dict:
+    """Soziale Lage als Zeitreihe (Wegweiser Kommune, CC0).
+
+    17 Indikatoren: SGB-II-Quoten (gesamt, Kinder, Ältere), Altersarmut,
+    Grundsicherung, Wohngeld, Schuldnerquote, Einkommensverteilung.
+    Jahreswerte ab 2006.
+    """
+    return await _wegweiser_dataset(slug, "social-situation", request)
+
+
+@router.get("/cities/{slug}/care")
+async def city_care(slug: str, request: Request) -> dict:
+    """Pflegekennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
+
+    11 Indikatoren: Pflegebedürftige je Altersgruppe, Pflegequote, Verteilung
+    auf ambulante und stationäre Pflege sowie Pflegegeld, dazu die
+    Pflegevorausberechnung bis 2030. Jahreswerte ab 2006.
+
+    Teilabdeckung: 73 Städte, die übrigen führt die Quelle erst ab Kreisebene.
+    """
+    return await _wegweiser_dataset(slug, "care", request)
 
 
 @router.get("/cities/{slug}/land-values")
@@ -4165,7 +5012,7 @@ async def _smard_envelope(
     *,
     filter_id: str,
     region: str,
-    measure: str,
+    measure: Literal["load", "price"],
     unit: str,
 ) -> dict:
     """Gemeinsamer SMARD-Pfad für power-load/power-price (Toggle/Fetch/Map/Archiv)."""
@@ -4249,11 +5096,13 @@ async def city_power_price(slug: str, request: Request) -> dict:
 async def city_weather_warnings(slug: str, request: Request) -> dict:
     """Amtliche DWD-Wetterwarnungen je Stadt (max_level 0-4, Tier A).
 
-    Holt die bundesweite DWD-WarnApp-JSON (einmal gecacht) und filtert die Stadt
-    über ihre Gemeinde-Warncell (= '1'+AGS). max_level 0 = keine reguläre Warnung,
-    1-4 = DWD-Warnstufe; Hitze-/Sonderwarnungen (DWD-Code >= 50) zählen NICHT in
-    max_level, sondern stehen separat in special_warnings (Audit K5). Quelle:
-    Deutscher Wetterdienst (GeoNutzV). Deaktiviert -> 200 source_status="disabled".
+    Holt die Warnungen je Stadt über die keylose Brightsky-Alerts-API (lat/lon
+    aus dem Register-Geo, exakt das city_weather-Muster); die zuständige
+    Warncell liefert Brightsky in der Antwort mit. max_level 0 = keine reguläre
+    Warnung, 1-4 = Warnstufe aus der CAP-severity; Hitze-/UV-Gesundheits-
+    warnungen (category "health") zählen NICHT in max_level, sondern stehen
+    separat in special_warnings (Audit K5). Quelle: Deutscher Wetterdienst
+    (GeoNutzV). Deaktiviert -> 200 source_status="disabled".
     """
     entry = get_city(slug)
     cid = correlation_id.get()
@@ -4263,19 +5112,22 @@ async def city_weather_warnings(slug: str, request: Request) -> dict:
             "meta": {"correlation_id": cid, "source_status": "disabled"},
         }
     client = request.app.state.resilient_client
-    # Ein Fetch des bundesweiten Files reicht für alle Städte -> globaler Cache-Key.
-    key = build_cache_key("dwd_warnings", city_slug="all")
+    key = build_cache_key("dwd_warnings", city_slug=entry.slug)
 
     async def fetch_fn():
-        return await fetch_dwd_warnings_all(request.app.state.http)
+        return await fetch_dwd_warnings(
+            request.app.state.http,
+            slug=entry.slug,
+            lat=entry.geo.lat,
+            lon=entry.geo.lon,
+        )
 
-    full, status = await client.fetch("dwd_warnings", key, fetch_fn)
-    if full is None:
+    raw, status = await client.fetch("dwd_warnings", key, fetch_fn)
+    if raw is None:
         raise UpstreamError(
             "Quelle 'dwd_warnings' voruebergehend nicht erreichbar, kein Cache.",
             hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
         )
-    raw = extract_warncell(full, warncell_for_ags(entry.ags))
     record = map_dwd_warnings(
         entry.slug,
         raw,
@@ -4388,10 +5240,12 @@ async def city_fuel_prices(slug: str, request: Request) -> dict:
             apikey=apikey,
         )
 
-    # ON-DEMAND (store=False): Tankerkoenig/MTS-K-ToS verbieten Spiegeln/Vorhalten
-    # ("nur aktuelle Preise auf Useraktion"). Daher KEIN Redis-Cache, kein Stale,
-    # kein SWR-Refresh und kein persistenter Schreibpfad (auch kein Hintergrund-Job).
-    raw, status = await client.fetch("tankerkoenig", cache_key, fetch_fn, store=False)
+    # Kurzlebiger Redis-Cache (Owner-Entscheid 2026-07-08): 5 min fresh via
+    # Registry-TTL entlastet den geteilten API-Key und hält uns unter dem
+    # Tankerkönig-Limit von 1 Request/Minute. KEINE dauerhafte Speicherung:
+    # kein Archiv (append_record), kein Hintergrund-Job; Redis läuft ohne
+    # Persistence (allkeys-lru). Outbound-Limits (2 parallel, 1s Abstand) bleiben.
+    raw, status = await client.fetch("tankerkoenig", cache_key, fetch_fn)
     if raw is None:
         raise UpstreamError(
             "Quelle 'tankerkoenig' voruebergehend nicht erreichbar, kein Cache.",
@@ -4417,9 +5271,14 @@ async def city_fuel_prices(slug: str, request: Request) -> dict:
         lat=entry.geo.lat,
         lon=entry.geo.lon,
     )
-    # KEIN append_record: Tankerkönig-ToS untersagen das Vorhalten/Archivieren der
-    # Preise (on-demand, nur Live-Anzeige). Die Quelle wird daher nirgends
-    # persistiert, sondern ausschließlich live bei Useraktion ausgeliefert.
+    # KEIN append_record: Die Tankerkönig-Nutzungsbedingungen kennen kein
+    # ausdrückliches Cache-/Speicherverbot (Wortlaut geprüft 2026-07-25), verlangen
+    # aber "Requests on Demand - auf Useraktion" und "Regelmäßige, nicht explizit
+    # vom User initiierte Requests sind zu vermeiden"; Spiegeln/Massenabfragen nur
+    # nach Absprache mit Tankerkönig. Deshalb: kein Archiv, kein Hintergrund-Job,
+    # nur Live-Auslieferung bei Useraktion. Der kurze Redis-Cache oben senkt die
+    # Upstream-Last und arbeitet damit FÜR die Vorgabe "unnötige Belastungen des
+    # Tankerkönig-Servers sind zu vermeiden".
     return {
         "data": record.model_dump(mode="json"),
         "meta": {
@@ -4509,6 +5368,34 @@ async def city_sharing(slug: str, request: Request) -> dict:
     }
 
 
+# Lokale Umlaut-Normalisierung für den q-Namensfilter des Bahnhofs-Katalogs
+# (Vorbild: Doppel-Index im Slug-Resolver, bewusst NICHT aus registry importiert).
+# Zwei Formen decken beide Eingabe-Gewohnheiten ab: Expansion (muenchen) und
+# Bare-Vowel (munchen); ß -> ss kommt aus casefold.
+_STATION_EXPAND_UMLAUT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue"})
+_STATION_BARE_UMLAUT = str.maketrans({"ä": "a", "ö": "o", "ü": "u"})
+
+
+def _station_name_prep(raw: str) -> str:
+    """Vorstufe der Namens-Normalisierung: NFC + strip + casefold."""
+    return unicodedata.normalize("NFC", raw).strip().casefold()
+
+
+def _station_name_matches(query: str, name: str) -> bool:
+    """Umlaut-toleranter Teilstring-Match von ``query`` auf einem Bahnhofsnamen.
+
+    Matcht, wenn die Expansion-Form von q Teilstring der Expansion-Form des
+    Namens ist ODER die Bare-Vowel-Form von q Teilstring der Bare-Vowel-Form
+    des Namens ist. So matchen sowohl ``munchen`` als auch ``muenchen`` den
+    Namen "München Hbf".
+    """
+    q = _station_name_prep(query)
+    n = _station_name_prep(name)
+    if q.translate(_STATION_EXPAND_UMLAUT) in n.translate(_STATION_EXPAND_UMLAUT):
+        return True
+    return q.translate(_STATION_BARE_UMLAUT) in n.translate(_STATION_BARE_UMLAUT)
+
+
 @router.get("/cities/{slug}/stations")
 async def city_stations(slug: str, request: Request) -> dict:
     """Bahnhofs-Katalog einer Stadt: ALLE DB-Bahnhöfe (StaDa, DATA-36, CC BY 4.0).
@@ -4522,6 +5409,14 @@ async def city_stations(slug: str, request: Request) -> dict:
     - ``ok``: gemappter station_catalog-Payload
     StaDa wird EINMAL bundesweit geholt + lange gecacht und je Stadt gefiltert; die
     Keys gelangen NIE in Cache-Key/Response/Log. Volle Abdeckung (alle Städte).
+
+    Optionale Query-Parameter (Filter NACH dem Cache-Read, Cache-Key bleibt
+    q-/limit-frei -> kein Poisoning):
+    - ``q``: umlaut-toleranter Teilstring-Match auf dem Bahnhofsnamen
+      (``munchen`` UND ``muenchen`` matchen "München Hbf"); kein Treffer ->
+      ``no_data``.
+    - ``limit``: kappt die sortierte Liste (minimum 1, Cap 100, Default alle);
+      Unsinn -> 422.
     """
     entry = get_city(slug)
     cid = correlation_id.get()
@@ -4562,6 +5457,20 @@ async def city_stations(slug: str, request: Request) -> dict:
     # dann nach Kategorie (Wichtigkeit, 1=gross) und Name sortiert.
     stations = [s for s in raw.get("stations", []) if s.get("ags") == entry.ags]
     stations.sort(key=lambda s: (s.get("category") or 99, s.get("name") or ""))
+    # Optionaler Namensfilter (umlaut-tolerant) NACH ags-Filter + Sortierung,
+    # aber VOR dem no_data-Zweig: kein Treffer landet konsistent in no_data.
+    q = request.query_params.get("q")
+    if q is not None and q.strip():
+        stations = [
+            s for s in stations if _station_name_matches(q, s.get("name") or "")
+        ]
+    # Optionales limit NACH dem q-Filter (Default alle, minimum 1, Cap 100).
+    raw_limit = request.query_params.get("limit")
+    if raw_limit is not None:
+        limit = _tender_int_param(
+            raw_limit, name="limit", default=100, minimum=1, maximum=100
+        )
+        stations = stations[:limit]
     if not stations:
         return {
             "data": None,
@@ -4796,28 +5705,16 @@ async def city_health(slug: str, request: Request) -> dict:
       (exakter Destatis-Wortlaut). Ist GENESIS aus/credential-los (Prod-Realität),
       greift der keylose Wikidata-Fallback (H3-Fix: SPARQL Q16917 + P131 je
       Stadt-QID, sortenrein CC0, ``meta.fallback=wikidata``).
-    - ICU-Kapazität je Kreis (RKI-DIVI-GitHub-CSV, CC-BY 4.0): read-only aus dem
-      vorverarbeiteten divi-Datensatz. H2-Fix: nur der JÜNGSTE Stand
-      (nach ``payload.datum`` sortiert), nicht der komplette Verlauf;
-      ``meta.icu_latest`` trägt das Stichdatum.
-
     Ablauf (DATA-25/06, API-01, GOV-02/03): Register-Lookup (unbekannter
     Slug -> 404 mit Hint), account-gated Toggle-/Key-Guard für das
     Krankenhausverzeichnis (Quelle aus ODER kein Credential -> kein Live-Call),
-    Read der ICU-Kapazität. ``source_status`` weist die Abdeckung ehrlich
-    aus (``disabled``/``not_ingested``/``ok``).
+    ``source_status`` weist die Abdeckung ehrlich aus
+    (``disabled``/``not_ingested``/``ok``).
 
     KRITISCH (T-08-CRED): Die GENESIS-Credentials gelangen nur in den POST-Body des
-    Adapters, NIE in den Cache-Key oder die Response. KRITISCH (T-08-DBR): Diese
-    Route liefert NUR die Tier-A-Aggregate (Krankenhaus, Kreis-ICU-CSV); die
-    klinikscharfe DIVI-Live-Lage läuft getrennt über ``/icu-live`` (Tier C,
-    nur Live-Anzeige).
+    Adapters, NIE in den Cache-Key oder die Response.
     """
     entry = get_city(slug)
-
-    # ICU-Kapazität (Kreisebene, CC-BY 4.0) read-only aus dem divi-Datensatz
-    # (NIE die CSV im Request-Pfad). Fehlend -> [] (not_ingested).
-    icu_records = read_records(source="divi", tier="A", city_slug=entry.slug)
 
     # Account-gated Toggle-/Key-Guard für das Krankenhausverzeichnis frisch lesen
     # (Settings() statt app.state.settings, damit der per-Test gesetzte Env-Override
@@ -4862,9 +5759,8 @@ async def city_health(slug: str, request: Request) -> dict:
                 hospital_data = wiki_record.model_dump(mode="json")
                 fallback = "wikidata"
 
-        # Kein Krankenhaus (auch kein Wikidata-Treffer) und keine ICU-Kapazität
-        # -> die ganze Slice ist disabled; sonst die vorhandene(n) Sicht(en).
-        if hospital_data is None and not icu_records:
+        # Kein Krankenhaus (auch kein Wikidata-Treffer) -> Slice ist disabled.
+        if hospital_data is None:
             return {
                 "data": None,
                 "meta": {
@@ -4878,6 +5774,10 @@ async def city_health(slug: str, request: Request) -> dict:
         key = build_cache_key("genesis_hospital", city_slug=entry.slug)
         genesis_user = settings.genesis_username
         genesis_password = settings.genesis_password
+        if genesis_user is None or genesis_password is None:
+            # Nie erreichbar: hospital_enabled hat beide Credentials geprueft.
+            # Der Guard existiert fuer die statische Optional-Kette (pyright).
+            raise RuntimeError("GENESIS-Credentials fehlen trotz hospital_enabled")
 
         async def fetch_fn():
             # K2-Fix (Audit 2026-06-29): fetch_hospitals (echtes 23111-Schema:
@@ -4912,24 +5812,9 @@ async def city_health(slug: str, request: Request) -> dict:
         await append_record(record, source="genesis")
         hospital_data = record.model_dump(mode="json")
 
-    # H2-Fix (Audit 2026-06-29): read_records liefert ALLE ICU-Records unsortiert
-    # (Live: berlin = 1971 Records ab 2020). Früher wurde der ganze Verlauf
-    # ausgeliefert (icu_capacity[0] = ältester Stand). Jetzt: nach Stand-Datum
-    # (payload.datum) sortieren und NUR den jüngsten Record ausliefern; ein
-    # latest-Stichdatum macht den Stand transparent. Records ohne datum sinken
-    # ans Ende (leerer Sortier-Key).
-    def _icu_datum(rec) -> str:
-        datum = getattr(rec.payload, "datum", None)
-        return datum or ""
-
-    icu_sorted = sorted(icu_records, key=_icu_datum)
-    latest_icu = icu_sorted[-1] if icu_sorted else None
-    icu_data = [latest_icu.model_dump(mode="json")] if latest_icu is not None else []
-    icu_latest_date = _icu_datum(latest_icu) or None if latest_icu is not None else None
-
-    # source_status: ok sobald irgendeine Sicht Daten trägt, sonst not_ingested
-    # (Quelle aktiv/lesbar, aber noch kein Snapshot/Datensatz).
-    status = "ok" if (hospital_data is not None or icu_data) else "not_ingested"
+    # source_status: ok sobald das Krankenhausverzeichnis Daten trägt, sonst
+    # not_ingested (Quelle aktiv/lesbar, aber noch kein Snapshot).
+    status = "ok" if hospital_data is not None else "not_ingested"
 
     meta: dict = {
         "correlation_id": correlation_id.get(),
@@ -4937,96 +5822,20 @@ async def city_health(slug: str, request: Request) -> dict:
     }
     if fallback is not None:
         meta["fallback"] = fallback
-    if icu_latest_date is not None:
-        meta["icu_latest"] = icu_latest_date
 
     return {
-        "data": {
-            "hospital": hospital_data,
-            "icu_capacity": icu_data,
-        },
+        "data": {"hospital": hospital_data},
         "meta": meta,
     }
 
 
-@router.get("/cities/{slug}/icu-live")
-async def city_icu_live(slug: str, request: Request) -> dict:
-    """Liefert klinikscharfe DIVI-Live-ICU-Daten (DATA-25b, Tier C, T-08-DBR).
-
-    Ablauf (DATA-25b/06, API-01, GOV-02) nach dem ``city_air``-Tier-C-Muster:
-    Register-Lookup (unbekannter Slug -> 404 mit Hint), Quellen-Toggle-Prüfung
-    (``enable_divi`` aus -> 200 ``source_status=disabled``, nie 5xx), resilienter
-    Fetch über die Fassade gegen die keylose DIVI-Live-API, Mapping über
-    ``map_icu_live`` (Tier C). Fehlt eine kuratierte Kreis-Kennung oder ist der
-    Upstream tot ohne Cache, liefert die Route ehrlich
-    ``source_status="no_data"`` (200, kein 5xx; Tier-C-Live-Degradation).
-
-    KRITISCH (Datenbank-Schutzrecht, RESEARCH Pitfall 4, T-08-DBR): Die
-    klinikscharfe DIVI-Live-Lage ist Tier C live-only. Diese Route leitet die
-    Daten ausschließlich live durch (bewusste Tier-C-Entscheidung, kein Versehen,
-    analog city_air). NUR die Kreis-Aggregat-CSV (CC-BY 4.0, Tier A) läuft
-    getrennt über ``/health``.
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: deaktiviert -> 200 disabled.
-    if not Settings().enable_divi:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    client = request.app.state.resilient_client
-    key = build_cache_key("divi_live", city_slug=entry.slug)
-
-    # Kreis-Präfix aus dem Register ableiten (Finding 218): die ersten 5 AGS-Stellen
-    # sind der Kreisschlüssel -> alle 84 Städte abgedeckt, nicht nur die vier
-    # kuratierten. Quelle ist das Register (entry.ags), nie User-Input (T-08-SSRF).
-    kreis_ags = entry.ags[:5] if entry.ags else None
-
-    async def fetch_fn():
-        return await fetch_icu_live(
-            request.app.state.http, slug=entry.slug, kreis_ags=kreis_ags
-        )
-
-    raw, status = await client.fetch("divi_live", key, fetch_fn)
-
-    # Tier-C-Live-Degradation: toter Upstream ohne Cache (raw None) oder keine
-    # kuratierte Kreis-Kennung (kreis_id None) -> ehrliches no_data (200), KEIN
-    # 5xx. Die Live-Lage ist optional/teilabdeckend.
-    if raw is None or raw.get("kreis_id") is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "no_data",
-            },
-        }
-
-    record = map_icu_live(
-        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
-    )
-    # KRITISCH (T-08-DBR, Pitfall 4): Tier C live-only. Der Envelope wird direkt
-    # zurückgegeben.
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-            "cache_status": status,
-        },
-    }
-
-
 # OCDS-Status-Allowlist (T-21-INPUT): nur diese Werte gelangen überhaupt in den
-# parametrisierten Reader. "active" = laufende Ausschreibung, "complete" = bereits
-# vergeben (OCDS-tender.status). Ein unbekannter Wert -> 422, BEVOR roher Input in
-# die Query geht (kein f-string/%-SQL am Aufrufort, alle Werte ?-gebunden).
+# parametrisierten Reader. "active" = laufendes Vergabeverfahren (aus der
+# Auftragsbekanntmachung, notice_type=tender), "complete" = entschiedenes Verfahren
+# inkl. aufgehobener Vergaben (notice_type=award). Der DE-OCDS-Export trägt NIE ein
+# tender.status; der status wird semantisch aus dem notice_type abgeleitet, der rohe
+# Zuschlag-Status steht im Feld award_status. Ein unbekannter Wert -> 422, BEVOR
+# roher Input in die Query geht (kein f-string/%-SQL am Aufrufort, alle ?-gebunden).
 _TENDER_STATUS_ALLOWED = frozenset({"active", "complete"})
 
 # match-Allowlist (T-21-INPUT): Bezug der Stadt-Zuordnung. "buyer_city" = Sitz des
@@ -5068,6 +5877,26 @@ def _tender_int_param(
     return min(value, maximum)
 
 
+def _tender_since_param(raw: str | None) -> str | None:
+    """Validiert den ``since``-Query-Parameter als ISO-Datum YYYY-MM-DD.
+
+    ``None`` -> ``None`` (kein Filter). Sonst strikt via ``strptime`` prüfen und
+    bei Formatfehler 422 (``UnprocessableError``, T-21-INPUT). Bei Erfolg den
+    unveränderten String zurückgeben (der Reader vergleicht String gegen die
+    ``publication_date``-Spalte).
+    """
+    if raw is None:
+        return None
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError as exc:
+        raise UnprocessableError(
+            "Query-Parameter 'since' muss ein ISO-Datum YYYY-MM-DD sein.",
+            hint="Beispiel: ?since=2026-01-01",
+        ) from exc
+    return raw
+
+
 @router.get("/cities/{slug}/public-tenders")
 async def city_public_tenders(slug: str, request: Request) -> dict:
     """Liefert öffentliche Auftragsvergaben EINER Stadt (TENDER-01/05, CC0/Tier A).
@@ -5084,9 +5913,22 @@ async def city_public_tenders(slug: str, request: Request) -> dict:
     /``resilient_client`` und schreibt NIE ``append_record``. Die OCDS-ZIPs werden
     offline vom Batch-Ingest (``ingest.oeffentlichevergabe``) gezogen.
 
+    status-Semantik (Quick 260708-f5c): Der DE-OCDS-Export trägt NIE ein
+    ``tender.status``; der ``status`` wird semantisch aus dem notice_type
+    (OCDS-Release-tag) abgeleitet. ``active`` = laufendes Vergabeverfahren aus der
+    Auftragsbekanntmachung (notice_type=tender), ``complete`` = entschiedenes
+    Verfahren inkl. aufgehobener/eingestellter Vergaben (notice_type=award). Der
+    rohe Zuschlag-Status steht je Notice im Feld ``award_status`` (active =
+    Zuschlag erteilt, pending, unsuccessful = aufgehoben, None wenn keine awards).
+    Ehrlich: die Angebotsfrist (``deadline``) fehlt im Quell-Export fast immer und
+    steht dann nur in der Original-Bekanntmachung über ``source_url``.
+
     Optionale Query-Filter (parametrisiert in den Reader, T-21-INPUT/T-08-SQLI):
-    - ``status``: ``active`` (laufend) | ``complete`` (vergeben)
+    - ``status``: ``active`` (laufendes Verfahren) | ``complete`` (entschieden)
     - ``match``: ``buyer_city`` | ``place_of_performance``
+    - ``q``: freies Titel-Stichwort (parametrisierter ``LIKE``-Teilstring)
+    - ``since``: ISO-Datum YYYY-MM-DD (nur Bekanntmachungen ab dem Datum;
+      ungültiges Datum -> 422)
     - ``limit`` (Default 50, Cap 200) / ``offset`` (>=0) für Pagination
 
     Drei ``source_status``-Werte:
@@ -5117,7 +5959,7 @@ async def city_public_tenders(slug: str, request: Request) -> dict:
     if status_filter is not None and status_filter not in _TENDER_STATUS_ALLOWED:
         raise UnprocessableError(
             "Query-Parameter 'status' ist unzulaessig.",
-            hint="Erlaubt: active (laufend), complete (vergeben).",
+            hint="Erlaubt: active (laufend), complete (entschieden).",
         )
 
     match_filter = request.query_params.get("match")
@@ -5126,6 +5968,11 @@ async def city_public_tenders(slug: str, request: Request) -> dict:
             "Query-Parameter 'match' ist unzulaessig.",
             hint="Erlaubt: buyer_city, place_of_performance.",
         )
+
+    # q ist freier Text (kein Allowlist-Zwang), wird im Reader parametrisiert
+    # gebunden; since strikt als ISO-Datum validiert (sonst 422, T-21-INPUT).
+    q_filter = request.query_params.get("q")
+    since_filter = _tender_since_param(request.query_params.get("since"))
 
     limit = _tender_int_param(
         request.query_params.get("limit"),
@@ -5148,6 +5995,8 @@ async def city_public_tenders(slug: str, request: Request) -> dict:
         entry.slug,
         status=status_filter,
         match=match_filter,
+        q=q_filter,
+        since=since_filter,
         limit=limit,
         offset=offset,
     )
@@ -5170,6 +6019,256 @@ async def city_public_tenders(slug: str, request: Request) -> dict:
             "attribution": {
                 "text": SOURCE_LICENSE["oeffentlichevergabe"]["attribution"],
                 "license_url": _TENDER_LICENSE_URL,
+            },
+        },
+        "meta": {
+            "correlation_id": correlation_id.get(),
+            "source_status": "ok",
+        },
+    }
+
+
+@router.get("/tenders")
+async def all_public_tenders(request: Request) -> dict:
+    """Sucht öffentliche Auftragsvergaben deutschlandweit (Cross-City, CC0/Tier A).
+
+    Analog ``city_public_tenders``, aber OHNE Stadt-Lookup: der Endpunkt sucht
+    über ALLE Städte im deduplizierten SQLite-Store (Reader
+    ``search_public_tenders``), damit der Ausschreibungs-GPT bundesweit nach
+    Stichwort und Zeitfenster suchen kann, ohne jede Stadt einzeln abzufragen.
+    Da ``cities.router`` ohne Prefix gemountet ist, ergibt der Pfad
+    ``/api/v1/tenders``. Die Tender-Konstanten und ``_tender_int_param`` werden
+    aus einer Quelle der Wahrheit wiederverwendet (Best-Practice #6, keine
+    Duplikate).
+
+    KRITISCH (T-21-REQINGEST, kein Live-ZIP im Request-Pfad): reine read-only
+    Store-Lesung, NIE ``fetch_notice_export``/``resilient_client``, kein
+    ``append_record``.
+
+    status-Semantik (Quick 260708-f5c): Der DE-OCDS-Export trägt NIE ein
+    ``tender.status``; der ``status`` wird semantisch aus dem notice_type
+    abgeleitet. ``active`` = laufendes Vergabeverfahren (notice_type=tender),
+    ``complete`` = entschiedenes Verfahren inkl. aufgehobener Vergaben
+    (notice_type=award); der rohe Zuschlag-Status steht im Feld ``award_status``.
+    Ehrlich: die Angebotsfrist (``deadline``) fehlt im Quell-Export fast immer.
+
+    Optionale Query-Filter (parametrisiert in den Reader, T-21-INPUT/T-08-SQLI):
+    - ``q``: freies Titel-Stichwort (parametrisierter ``LIKE``-Teilstring)
+    - ``status``: ``active`` (laufendes Verfahren) | ``complete`` (entschieden)
+    - ``since``: ISO-Datum YYYY-MM-DD (ungültiges Datum -> 422)
+    - ``limit`` (Default 50, Cap 200) / ``offset`` (>=0) für Pagination
+
+    ``source_status``: ``disabled`` (Toggle aus) | ``no_data`` (leerer Store) |
+    ``ok`` (Bekanntmachungen vorhanden).
+    """
+    # Quellen-Toggle frisch lesen (Env-Override greift pro Test). Aus -> disabled.
+    s = Settings()
+    if not s.enable_oeffentlichevergabe:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "disabled",
+            },
+        }
+
+    # Query-Validierung VOR der Store-Lesung (T-21-INPUT): status gegen Allowlist
+    # (sonst 422), q frei (im Reader ?-gebunden), since strikt als ISO-Datum.
+    status_filter = request.query_params.get("status")
+    if status_filter is not None and status_filter not in _TENDER_STATUS_ALLOWED:
+        raise UnprocessableError(
+            "Query-Parameter 'status' ist unzulaessig.",
+            hint="Erlaubt: active (laufend), complete (entschieden).",
+        )
+
+    q_filter = request.query_params.get("q")
+    since_filter = _tender_since_param(request.query_params.get("since"))
+
+    limit = _tender_int_param(
+        request.query_params.get("limit"),
+        name="limit",
+        default=_TENDER_LIMIT_DEFAULT,
+        minimum=1,
+        maximum=_TENDER_LIMIT_MAX,
+    )
+    offset = _tender_int_param(
+        request.query_params.get("offset"),
+        name="offset",
+        default=0,
+        minimum=0,
+        maximum=2_000_000_000,
+    )
+
+    # Cross-City read-only Store-Lesung (NIE Live-ZIP, T-21-REQINGEST). Leer -> []
+    # -> no_data, kein 5xx. Alle Filterwerte ?-gebunden im Reader (T-08-SQLI).
+    rows = search_public_tenders(
+        q=q_filter,
+        status=status_filter,
+        since=since_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+    if not rows:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "no_data",
+            },
+        }
+
+    return {
+        "data": {
+            "notices": rows,
+            "count": len(rows),
+            "license_id": SOURCE_LICENSE["oeffentlichevergabe"]["license_id"],
+            "license_tier": "A",
+            "attribution": {
+                "text": SOURCE_LICENSE["oeffentlichevergabe"]["attribution"],
+                "license_url": _TENDER_LICENSE_URL,
+            },
+        },
+        "meta": {
+            "correlation_id": correlation_id.get(),
+            "source_status": "ok",
+        },
+    }
+
+
+# --- council-papers (Quick 260708-tsv, kommunale Ratsinformationen, OParl) ----
+
+# Pagination-Cap der council-papers-Route (eigene Konstanten, kleiner als tenders,
+# weil einzelne Paper-Objekte grösser sind). Best-Practice #8.
+_COUNCIL_LIMIT_DEFAULT = 50
+_COUNCIL_LIMIT_MAX = 100
+
+
+@router.get("/cities/{slug}/council-papers")
+# Alias-Pfad, absichtlich NICHT im generierten Schema: zwei Routen auf derselben
+# Funktion erben dieselbe operationId, und FastAPI warnt dann bei jedem
+# Spec-Aufbau ("Duplicate Operation ID"). Die veroeffentlichte Referenz
+# (docs/openapi.yaml) fuehrt den Alias ohnehin nur in der Beschreibung, nicht als
+# eigenen Pfad; include_in_schema haelt beide Specs deckungsgleich. Die Route
+# bleibt voll funktionsfaehig (Test test_council_papers_alias).
+@router.get("/cities/{slug}/council/papers", include_in_schema=False)
+async def city_council_papers(slug: str, request: Request) -> dict:
+    """Liefert kommunale Ratsinformationen EINER Stadt (council-papers, OParl).
+
+    Schwester-Route zu ``city_public_tenders``: was die Stadt ENTSCHEIDET (Vorlagen,
+    Anträge, Beschlüsse), analog zu was die Stadt EINKAUFT. Unter ZWEI Pfaden
+    registriert (dieselbe Funktion): ``/cities/{slug}/council-papers`` (kanonisch,
+    MCP-/Katalog-/Coverage-Key) und ``/cities/{slug}/council/papers`` (Alias für
+    menschliche/GPT-Nutzung).
+
+    Ablauf:
+    1. ``get_city(slug)`` (unbekannter Slug -> zentraler 404-Handler).
+    2. Coverage-Guard: Stadt NICHT in ``COVERED_COUNCIL_CITIES`` -> 404 mit Hint
+       (nur die acht lizenzgeklärten Städte sind abgedeckt).
+    3. ``enable_council`` aus -> 200 ``source_status="disabled"``, data None.
+    4. Query-Validierung: ``q`` frei (im Reader ?-gebunden), ``since`` ISO-Datum,
+       ``paper_type`` frei/optional, ``limit`` (Default 50, Cap 100) / ``offset``.
+    5. ``read_council_papers`` (read-only Store, NIE Live-OParl im Request-Pfad).
+       Leer -> 200 ``source_status="no_data"``.
+    6. Treffer -> ``{data:{papers, count, total, attribution}, meta:{...}}`` mit
+       per-Stadt-Attribution aus ``COUNCIL_CITY_LICENSE``. ``count`` ist die
+       Seitenlänge, ``total`` der Gesamtbestand zu den aktiven Filtern (gleiche
+       ?-gebundene Bedingungen, ``count_council_papers``), damit Clients den
+       Bestand kennen, ohne bis zur leeren Seite zu blättern.
+
+    Read-only (wie public-tenders): der Batch-Ingest (``ingest.oparl``) zieht die
+    OParl-Paper offline; die Route liest ausschliesslich aus dem Store. PDFs sind
+    NUR als ``main_file_url``-Link enthalten (nie gespiegelt).
+    """
+    entry = get_city(slug)
+
+    # Coverage-Guard: nur die acht lizenzgeklärten Städte (fail-closed). Eine nicht
+    # abgedeckte Stadt ist hier ein echter 404 (die Datenart existiert für sie
+    # nicht), mit agentenfreundlichem Hint.
+    if entry.slug not in COVERED_COUNCIL_CITIES:
+        raise NotFoundError(
+            f"council-papers ist für '{entry.slug}' nicht verfügbar.",
+            hint=(
+                "council-papers gibt es nur für: "
+                + ", ".join(sorted(COVERED_COUNCIL_CITIES))
+                + "."
+            ),
+        )
+
+    # Quellen-Toggle frisch lesen (Settings() statt app.state, damit der per-Test
+    # gesetzte Env-Override greift). Default-off: aus -> 200 disabled.
+    s = Settings()
+    if not s.enable_council:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "disabled",
+            },
+        }
+
+    # Query-Validierung VOR der Store-Lesung (T-INPUT): q/paper_type frei (im Reader
+    # ?-gebunden), since strikt ISO-Datum (sonst 422), limit/offset int + Cap.
+    q_filter = request.query_params.get("q")
+    paper_type_filter = request.query_params.get("paper_type")
+    since_filter = _tender_since_param(request.query_params.get("since"))
+
+    limit = _tender_int_param(
+        request.query_params.get("limit"),
+        name="limit",
+        default=_COUNCIL_LIMIT_DEFAULT,
+        minimum=1,
+        maximum=_COUNCIL_LIMIT_MAX,
+    )
+    offset = _tender_int_param(
+        request.query_params.get("offset"),
+        name="offset",
+        default=0,
+        minimum=0,
+        maximum=2_000_000_000,
+    )
+
+    rows = read_council_papers(
+        entry.slug,
+        q=q_filter,
+        since=since_filter,
+        paper_type=paper_type_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+    if not rows:
+        return {
+            "data": None,
+            "meta": {
+                "correlation_id": correlation_id.get(),
+                "source_status": "no_data",
+            },
+        }
+
+    # Gesamtbestand zu den aktiven Filtern (gleiche ?-gebundene Bedingungen wie
+    # die Lese-Query): Clients sollen den Bestand kennen, ohne bis zur leeren
+    # Seite zu blättern.
+    total = count_council_papers(
+        entry.slug,
+        q=q_filter,
+        since=since_filter,
+        paper_type=paper_type_filter,
+    )
+
+    lic = COUNCIL_CITY_LICENSE[entry.slug]
+    return {
+        "data": {
+            "papers": rows,
+            "count": len(rows),
+            "total": total,
+            "license_id": lic["license_id"],
+            "license_tier": "A",
+            "attribution": {
+                "text": lic["attribution"],
+                "license_url": lic["license_url"],
+                "source": lic["source"],
+                "modified": lic["modified"],
             },
         },
         "meta": {

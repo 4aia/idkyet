@@ -25,6 +25,8 @@ import math
 
 import httpx
 
+from infranode.normalization.fields import clean_text, post_code
+
 _BASE = "https://bundes-klinik-atlas.de/fileadmin/json/locations.json"
 
 # Umkreis um die Stadt (~20 km): Krankenhaeuser liegen im/am Stadtgebiet.
@@ -46,7 +48,7 @@ def _km(alat: float, alon: float, blat: float, blon: float) -> float:
 
 def _to_float(value: object) -> float | None:
     """Parst ein Koordinatenfeld (String/Zahl) defensiv zu float (oder None)."""
-    if value is None:
+    if value is None or not isinstance(value, (int, float, str)):
         return None
     try:
         return float(value)
@@ -99,8 +101,12 @@ async def fetch_hospital_atlas(
             {
                 "name": item.get("name"),
                 "street": item.get("street"),
-                "zip": item.get("zip"),
-                "city": item.get("city"),
+                # Kanonische Adressnamen (Konsistenz-Audit 2026-07-25);
+                # zip/city bleiben abgekuendigt mit identischem Wert stehen.
+                "post_code": post_code(item.get("zip")),
+                "place": clean_text(item.get("city")),
+                "zip": post_code(item.get("zip")),
+                "city": clean_text(item.get("city")),
                 "beds": beds,
                 "lat": hlat,
                 "lon": hlon,

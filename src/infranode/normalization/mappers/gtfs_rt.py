@@ -45,14 +45,23 @@ _GTFS_DE_ATTRIBUTION = "gtfs.de"
 _DELFI_ATTRIBUTION = "DELFI e.V."
 _CC_BY_SA_URL = "https://creativecommons.org/licenses/by-sa/4.0/"
 
+# quick-260707-kzd: VBB-Berlin steht unter CC-BY 4.0 (permissiv, Tier A), NICHT
+# CC-BY-SA wie gtfs.de/DELFI. Eigener Attribution-Text + eigene Lizenz-URL, damit
+# die Provenance je Quelle ehrlich bleibt (keine Lizenzvermischung).
+_VBB_ATTRIBUTION = "VBB"
+_CC_BY_URL = "https://creativecommons.org/licenses/by/4.0/"
+
 
 def attribution_for_source(used_source: str | None) -> str:
-    """Waehlt den Attribution-Text aus der RT-Provenance (DELFI vs gtfs.de).
+    """Waehlt den Attribution-Text aus der RT-Provenance (VBB vs DELFI vs gtfs.de).
 
-    ``"mobilithek_delfi"`` -> "DELFI e.V.", sonst (gtfs.de-Backup/Default) "gtfs.de".
-    Beide bleiben CC-BY-SA 4.0 Tier B (CONTEXT LOCKED); nur die Namensnennung
-    folgt der tatsächlich liefernden Quelle.
+    ``"vbb"`` -> "VBB" (CC-BY 4.0, Tier A), ``"mobilithek_delfi"`` -> "DELFI e.V.",
+    sonst (gtfs.de-Backup/Default) "gtfs.de". Fuer DELFI/gtfs.de bleibt es
+    CC-BY-SA 4.0 Tier B (CONTEXT LOCKED); die Lizenzwahl selbst trifft
+    ``map_transit_departures`` ueber ``used_source``.
     """
+    if used_source == "vbb":
+        return _VBB_ATTRIBUTION
     if used_source == "mobilithek_delfi":
         return _DELFI_ATTRIBUTION
     return _GTFS_DE_ATTRIBUTION
@@ -73,9 +82,16 @@ def _observed_at(raw: dict) -> datetime | None:
         return None
 
 
-def _attribution(*, source_attribution: str) -> Attribution:
-    """Baut die Tier-B-Attribution (CC-BY-SA 4.0)."""
-    return Attribution(text=source_attribution, license_url=_CC_BY_SA_URL)
+def _attribution(
+    *, source_attribution: str, license_url: str = _CC_BY_SA_URL
+) -> Attribution:
+    """Baut die Attribution mit der passenden Lizenz-URL.
+
+    Default ``_CC_BY_SA_URL`` (Tier B, gtfs.de/DELFI) -> bestehende Aufrufer/Tests
+    bleiben unveraendert; VBB reicht ``license_url=_CC_BY_URL`` (Tier A, CC-BY 4.0)
+    durch.
+    """
+    return Attribution(text=source_attribution, license_url=license_url)
 
 
 def map_transit_trip(
@@ -125,23 +141,39 @@ def map_transit_departures(
     ags: str | None = None,
     wikidata_qid: str | None = None,
     source_attribution: str = _GTFS_DE_ATTRIBUTION,
+    used_source: str | None = None,
 ) -> CanonicalRecord:
-    """Bildet Abfahrten je Halt auf einen ``CanonicalRecord`` ab (Tier B).
+    """Bildet Abfahrten je Halt auf einen ``CanonicalRecord`` ab.
 
     Die ``departures`` (je Abfahrt ein schlankes dict) wandern in den
     ``TransitDeparturePayload``. ``retrieved_at`` injiziert (keine Systemuhr).
+
+    quick-260707-kzd: die Lizenzklasse folgt ``used_source``. Bei ``"vbb"`` ->
+    CC-BY 4.0 / Tier A (permissiv, VBB); sonst (Default ``None`` und alle
+    Bestandswerte) unveraendert CC-BY-SA 4.0 / Tier B (gtfs.de/DELFI). Der
+    Default-Pfad laesst die bestehenden Tests unveraendert bestehen.
     """
+    if used_source == "vbb":
+        license_id = LicenseId.CC_BY_4_0
+        license_tier = LicenseTier.A
+        attribution = _attribution(
+            source_attribution=source_attribution, license_url=_CC_BY_URL
+        )
+    else:
+        license_id = LicenseId.CC_BY_SA_4_0
+        license_tier = LicenseTier.B
+        attribution = _attribution(source_attribution=source_attribution)
     return CanonicalRecord(
         city_slug=city_slug,
         geo=None,
         observed_at=_observed_at(raw),
         retrieved_at=retrieved_at,
         source=SourceId.GTFS_RT,
-        license_id=LicenseId.CC_BY_SA_4_0,
-        license_tier=LicenseTier.B,
+        license_id=license_id,
+        license_tier=license_tier,
         ags=ags,
         wikidata_qid=wikidata_qid,
-        attribution=_attribution(source_attribution=source_attribution),
+        attribution=attribution,
         payload=TransitDeparturePayload(
             stop_id=raw.get("stop_id"),
             departures=raw.get("departures", []),

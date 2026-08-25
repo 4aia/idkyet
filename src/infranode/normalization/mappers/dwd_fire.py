@@ -67,6 +67,9 @@ def map_fire_danger(
     """
     wbi_level = raw.get("wbi_level")
     glfi_level = raw.get("glfi_level")
+    # Kanonisch federal_state; das abgekündigte bundesland trägt identisch
+    # denselben Wert (Abkündigung 2026-08-01).
+    bundesland = raw.get("bundesland")
     return CanonicalRecord(
         city_slug=raw["slug"],
         geo=None,
@@ -89,7 +92,8 @@ def map_fire_danger(
             glfi_label=_label(glfi_level),
             station_name=raw.get("station_name"),
             station_id=raw.get("station_id"),
-            bundesland=raw.get("bundesland"),
+            bundesland=bundesland,
+            federal_state=bundesland,
             distance_km=raw.get("distance_km"),
             forecast_date=raw.get("forecast_date"),
             updated_at=raw.get("updated_at"),

@@ -1,4 +1,4 @@
-"""Stuttgart-Radzählstellen-Adapter ``fetch_stuttgart_radzaehl`` (DATA-40, Tier A).
+"""Stuttgart-Radzählstellen-Adapter ``fetch_stuttgart_bike_counts`` (DATA-40, Tier A).
 
 Liefert je Stuttgarter Radzählstelle den JÜNGSTEN Jahres-Summenwert keylos aus
 der offenen CSV (CC BY 4.0, Landeshauptstadt Stuttgart, [VERIFIED 2026-06-23]):
@@ -29,7 +29,7 @@ _CSV_URL = (
 _ENCODING = "cp1252"
 
 
-async def fetch_stuttgart_radzaehl(
+async def fetch_stuttgart_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,

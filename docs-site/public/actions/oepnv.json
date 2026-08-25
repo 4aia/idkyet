@@ -1,0 +1,382 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "InfraNode OePNV, Nahverkehr deutscher Staedte",
+  "version": "1.0.0",
+  "description": "Live-OePNV deutscher Staedte. Stadt-Boards bevorzugen: Hamburg -> getLiveHamburgDepartures, Frankfurt -> getLiveFrankfurtDepartures, Nuernberg -> getLiveNuernbergDepartures, Duesseldorf/Dortmund/Essen/Duisburg/Bochum/Wuppertal -> getLiveVrrDepartures."
+ },
+ "servers": [
+  {
+   "url": "https://infranode.dev"
+  }
+ ],
+ "paths": {
+  "/api/v1/cities": {
+   "get": {
+    "operationId": "getCities",
+    "summary": "Alle bekannten Städte auflisten",
+    "description": "Listet die Einträge des Stadt-Registers: 84 deutsche Großstädte über 100.000 Einwohner, davon 28 Kern-Städte mit voller Quellen-Abdeckung. Jeder Eintrag trägt den Slug, den du als {slug}-Pfadparameter in allen weiteren Endpunkten verwendest.",
+    "parameters": [],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/overview": {
+   "get": {
+    "operationId": "getCityOverview",
+    "summary": "Stadt-Überblick (Katalog aller Datenarten + Live-Highlights)",
+    "description": "Ein-Aufruf-Überblick einer Stadt: Basisdaten, ein Katalog ALLER verfügbaren Datenarten (je mit Abdeckungsstatus und dem passenden MCP-Tool) sowie ein kleiner Live-Highlight-Snapshot (Wetter, Luft, Bahn-Abfahrten), parallel und zeitgedeckelt.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/transit": {
+   "get": {
+    "operationId": "getCityTransit",
+    "summary": "ÖPNV-Haltestellen je Stadt (DELFI und HVV GTFS)",
+    "description": "Normalisierte ÖPNV-Haltestellen einer Stadt aus dem bundesweiten DELFI-GTFS-Feed bzw. dem HVV-Feed im kanonischen Envelope. Die Daten werden offline aufbereitet und als Snapshot je Stadt gehalten, sodass der Abruf schnell antwortet, ohne den Feed pro Request zu parsen.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "description": "Case-insensitiver Substring-Filter auf den Haltestellennamen (stop_name), z.B. alsterdorf.",
+      "x-description-en": "Case-insensitive substring filter on the stop name (stop_name), e.g. alsterdorf.",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "near",
+      "in": "query",
+      "required": false,
+      "description": "\"lat,lon\"; liefert nur Haltestellen im Umkreis, aufsteigend nach Distanz sortiert. Ungültige Werte -> 400.",
+      "x-description-en": "\"lat,lon\"; returns only stops within the radius, sorted by distance ascending. Invalid values -> 400.",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "radius_m",
+      "in": "query",
+      "required": false,
+      "description": "Suchradius für near in Metern (Default 1000).",
+      "x-description-en": "Search radius for near in metres (default 1000).",
+      "schema": {
+       "type": "integer",
+       "default": 1000
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "description": "Seitennummer der Default-Paginierung ohne q/near (Default 50 Einträge, Cap 200); meta.pagination weist total/returned/limit/offset/truncated aus.",
+      "x-description-en": "Page number of the default pagination without q/near (default 50 entries, cap 200); meta.pagination reports total/returned/limit/offset/truncated.",
+      "schema": {
+       "type": "integer"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "description": "Einträge pro Seite der Default-Paginierung ohne q/near (Default 50, Cap 200).",
+      "x-description-en": "Entries per page of the default pagination without q/near (default 50, cap 200).",
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/sharing": {
+   "get": {
+    "operationId": "getCitySharing",
+    "summary": "Bike-/Scooter-Sharing je Stadt, aggregiert (GBFS, Tier A)",
+    "description": "Live-Bike-/Scooter-Sharing je Stadt, aus offenen GBFS-Feeds der kuratierten Tier-A-Anbieter (Nextbike, CC0; für Frankfurt am Main DB Call a Bike über MobiData BW, DL-DE/BY-2.0) im Stadtgebiet zu einer Kennzahl aggregiert: vehicles_available (frei abgestellt + an Stationen), station_count und je...",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/cities/{slug}/road-events": {
+   "get": {
+    "operationId": "getCityRoadEvents",
+    "summary": "Innerstädtische Baustellen und Sperrungen je Stadt (Tier A)",
+    "description": "Liefert innerstädtische Baustellen und Sperrungen einer Stadt aus den schlüssellosen Pro-Stadt-Quellen (Berlin VIZ, Hamburg, Köln, München, MobiData BW, Dortmund, SPERRINFOSYS Sachsen) im kanonischen Envelope.",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/hamburg/departures": {
+   "get": {
+    "operationId": "getLiveHamburgDepartures",
+    "summary": "Live-ÖPNV-Abfahrten Hamburg je Station (HVV-Geofox-GTI)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel einer HVV-Station aus der HVV-Geofox-GTI-API: je Abfahrt Linie, Richtung, Soll-Offset in Minuten, Verspätung in Sekunden und Linien-Störungshinweise. Stadt fix hamburg (Geofox deckt nur den HVV-Raum ab).",
+    "parameters": [
+     {
+      "name": "station",
+      "in": "query",
+      "required": false,
+      "description": "HVV-Stationsname (Default \"Hamburg Hauptbahnhof\").",
+      "schema": {
+       "type": "string",
+       "default": "Hamburg Hauptbahnhof"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/frankfurt-am-main/departures": {
+   "get": {
+    "operationId": "getLiveFrankfurtDepartures",
+    "summary": "Live-ÖPNV-Abfahrten Frankfurt/Rhein-Main je Station (RMV-HAPI)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel einer Rhein-Main-Station aus der RMV-HAPI (HAFAS-ReST, www.rmv.de/hapi): je Abfahrt Linie, Richtung, Minuten bis zur Abfahrt und Verspätung in Sekunden. Stadt fix frankfurt-am-main (RMV deckt den Rhein-Main-Raum ab).",
+    "parameters": [
+     {
+      "name": "station",
+      "in": "query",
+      "required": false,
+      "description": "RMV-Stationsname (Default \"Frankfurt (Main) Hauptbahnhof\").",
+      "schema": {
+       "type": "string",
+       "default": "Frankfurt (Main) Hauptbahnhof"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/nuernberg/departures": {
+   "get": {
+    "operationId": "getLiveNuernbergDepartures",
+    "summary": "Live-ÖPNV-Abfahrten Nürnberg je Halt (VGN/VAG, keylos, Tier A)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel eines VGN-Halts aus der offenen, keylosen VAG-Puls-API (start.vag.de): je Abfahrt Linie, Richtung, Soll-Offset in Minuten, Verspätung in Sekunden und Produkt. Stadt fix nuernberg (VGN-Raum).",
+    "parameters": [
+     {
+      "name": "stop_id",
+      "in": "query",
+      "required": false,
+      "description": "Numerische VGN-Halt-ID (VGNKennung), Default \"510\" (Nürnberg Hbf).",
+      "schema": {
+       "type": "string",
+       "default": "510"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/{slug}/departures": {
+   "get": {
+    "operationId": "getLiveVrrDepartures",
+    "summary": "Live-ÖPNV-Abfahrten der VRR-Kernstädte + VVS Stuttgart je Station (Mentz-EFA, Tier C)",
+    "description": "Liefert die Echtzeit-Abfahrtstafel einer Station in einer der sechs VRR-Kernstädte (duesseldorf, dortmund, essen, duisburg, bochum, wuppertal, keylose Mentz-EFA efa.vrr.de) oder in Stuttgart (VVS, keylose Mentz-EFA www3.vvs.de): je Abfahrt Linie, Richtung, Minuten bis zur Abfahrt und Verspätung...",
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "description": "EFA-Verbund-Stadt-Slug: VRR-Kernstädte (duesseldorf, dortmund, essen, duisburg, bochum, wuppertal) oder VVS Stuttgart (stuttgart). Andere Städte liefern 404.",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "duesseldorf",
+        "dortmund",
+        "essen",
+        "duisburg",
+        "bochum",
+        "wuppertal",
+        "stuttgart"
+       ]
+      }
+     },
+     {
+      "name": "station",
+      "in": "query",
+      "required": false,
+      "description": "Stationsname (Default Hauptbahnhof der Stadt).",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  },
+  "/api/v1/live/{city}/transit/departures": {
+   "get": {
+    "operationId": "getLiveTransitDepartures",
+    "summary": "Live-ÖPNV-Abfahrten je Halt mit Verspätung (GTFS-RT, Tier B)",
+    "description": "Liefert die Live-Abfahrten eines Halts mit aktueller Verspätung aus dem GTFS-RT-Feed (gtfs.de bzw. Mobilithek-DELFI, CC-BY-SA = Tier B) im Live-Envelope (meta mit as_of und refresh_seconds=45, dem Poller-Takt).",
+    "parameters": [
+     {
+      "name": "city",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "berlin"
+      },
+      "description": "German city slug from getCities (German spelling, e.g. koeln, muenchen, nuernberg, frankfurt-am-main, halle-saale). English exonyms like 'cologne' or 'munich' are INVALID and return 404."
+     },
+     {
+      "name": "stop_id",
+      "in": "query",
+      "required": true,
+      "description": "DELFI-Halt-ID im Muster de:<AGS>:<id> (gegen eine Allowlist geprüft). Gültige IDs je Stadt liefert GET /api/v1/cities/{slug}/transit im Feld stop_id. NICHT die trip_stop_id der Bahnhofstafeln, die bezeichnet einen Halt einer Zugfahrt.",
+      "x-description-en": "DELFI stop ID in the pattern de:<AGS>:<id> (checked against an allowlist). Valid ids per city come from GET /api/v1/cities/{slug}/transit, field stop_id. NOT the trip_stop_id of the station boards, which denotes one stop of one train run.",
+      "schema": {
+       "type": "string",
+       "example": "de:11000:900003101::6"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Kanonischer Envelope: data (Nutzlast mit attribution/Lizenz) und meta (source_status ok/no_data/disabled, cache_status)."
+     },
+     "404": {
+      "description": "Unbekannte Stadt oder Ressource."
+     },
+     "429": {
+      "description": "Rate-Limit erreicht, spaeter erneut versuchen."
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {}
+ }
+}

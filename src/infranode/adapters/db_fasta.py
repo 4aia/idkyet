@@ -45,7 +45,7 @@ def _km(alat: float, alon: float, blat: float, blon: float) -> float:
 
 def _to_float(value: object) -> float | None:
     """Parst ein Koordinatenfeld defensiv zu float (oder None)."""
-    if value is None:
+    if value is None or not isinstance(value, (int, float, str)):
         return None
     try:
         return float(value)

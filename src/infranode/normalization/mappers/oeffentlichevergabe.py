@@ -39,8 +39,14 @@ _ATTRIBUTION = (
     "/ Beschaffungsamt des BMI"
 )
 
-# Stabile Notice-URL auf der Plattform (aus der fachlichen notice_id abgeleitet).
-_NOTICE_URL_PREFIX = "https://oeffentlichevergabe.de/notices/"
+# Stabile Notice-Detailseite der Plattform. Live verifiziert (2026-07-08, zwei
+# Befunde): (a) das frühere Muster "/notices/<uuid>" liefert 404; die echte
+# Detailseite ist die Such-UI mit noticeId-Query-Parameter. (b) Das Portal
+# erwartet als noticeId die BEKANNTMACHUNGS-UUID (OCDS release.id), NICHT die
+# tender.id (Verfahrens-UUID): release.id rendert die volle Bekanntmachung,
+# tender.id meldet "Es konnten keine Details zu der ID geladen werden" und die
+# Portal-Suche findet die Verfahrens-UUID auch nicht (kein Fallback).
+_NOTICE_URL_TEMPLATE = "https://oeffentlichevergabe.de/ui/de/search/details?noticeId="
 
 
 def _parse_observed_at(value: str | None) -> datetime | None:
@@ -60,10 +66,16 @@ def _parse_observed_at(value: str | None) -> datetime | None:
 
 
 def _source_url(notice: dict) -> str | None:
-    """Leitet eine stabile Notice-URL aus der notice_id ab (oder None)."""
-    notice_id = notice.get("notice_id")
-    if isinstance(notice_id, str) and notice_id.strip():
-        return f"{_NOTICE_URL_PREFIX}{notice_id.strip()}"
+    """Leitet die Detailseiten-URL der Notice aus der release_id ab (oder None).
+
+    Muster (live verifiziert 2026-07-08): die Such-UI der Plattform mit
+    noticeId-Query-Parameter, befuellt mit der BEKANNTMACHUNGS-UUID (OCDS
+    release.id). Die tender.id (notice_id) rendert dort keine Details. Fehlt
+    die release_id, ist die source_url ehrlich None (kein kaputter Link).
+    """
+    release_id = notice.get("release_id")
+    if isinstance(release_id, str) and release_id.strip():
+        return f"{_NOTICE_URL_TEMPLATE}{release_id.strip()}"
     return None
 
 
@@ -88,10 +100,14 @@ def map_public_tender(
     ``retrieved_at`` injiziert; ``geo=None``. Quelle CC0 = Tier A.
     """
     payload = PublicTenderPayload(
-        notice_id=notice.get("notice_id"),
-        notice_version=notice.get("notice_version"),
+        # Pflichtschluessel des Adapter-Vertrags (parse_notice liefert beide immer,
+        # sonst kein Notice-dict) -> Index-Zugriff statt get.
+        notice_id=notice["notice_id"],
+        notice_version=notice["notice_version"],
+        release_id=notice.get("release_id"),
         notice_type=notice.get("notice_type"),
         status=notice.get("status"),
+        award_status=notice.get("award_status"),
         title=notice.get("title"),
         buyer_name=notice.get("buyer_name"),
         buyer_city=slug,
@@ -103,6 +119,9 @@ def map_public_tender(
         publication_date=notice.get("publication_date"),
         deadline=notice.get("deadline"),
         award_date=notice.get("award_date"),
+        suppliers=list(notice.get("suppliers") or []),
+        award_value=notice.get("award_value"),
+        award_currency=notice.get("award_currency"),
         match=list(match),
         source_url=_source_url(notice),
     )

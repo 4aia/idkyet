@@ -28,6 +28,18 @@ Fetch (Cache-Miss) statt zu crashen.
 Cache-Poisoning-Schutz (T-03-06): ``build_cache_key`` baut versionierte Keys nur
 aus validierten Slugs/Params via stabilem sha256-Param-Hash, nie aus rohen
 User-Strings.
+
+Stale-Fenster-Härtung (Quick-260709-huj): In Produktion setzt
+``resilience/client.py`` das Stale-Fenster ``ttl_stale`` IMMER explizit (aus der
+Quellen-Registry bzw. dem bewusst kurzen ``_DEFAULT_TTL``). Der hier definierte
+24h-Floor (``_DEFAULT_STALE_FLOOR``) ist reine Defense-in-Depth für
+Direktaufrufer ohne ``ttl_stale`` und greift im Live-Pfad nie. Das lange
+Stale-Notfenster (bis 24h) ist speichersicher: Redis läuft mit
+``--maxmemory ... --maxmemory-policy allkeys-lru`` (deploy/docker-compose.prod.yml,
+Default 1gb) -> bei Speicherdruck verdrängt Redis die am längsten ungenutzten (=
+am seltensten angefragten) stale-Keys zuerst, es kommt nie zu OOM, nur zur
+Eviction der kältesten Reserve. Deshalb ist für die 24h-Retention KEINE
+deploy-Änderung nötig.
 """
 
 from __future__ import annotations
@@ -47,6 +59,17 @@ log = structlog.get_logger()
 # Mindest-Stale-Fenster (Sekunden), damit auch bei ttl=0 (sofort stale) ein
 # Stale-While-Revalidate-Pfad existiert, statt direkt als Cache-Miss zu zählen.
 _DEFAULT_STALE_PAD = 60.0
+
+# Defense-in-Depth (Quick-260709-huj): Wird ``cache_get_or_set`` OHNE explizites
+# ttl_stale gerufen, ist das effektive Stale-Notfenster mindestens dieser Floor
+# (24h). Dieser Default greift NUR bei Direktaufrufen ohne ttl_stale: in
+# Produktion setzt ``resilience/client.py`` ttl_stale IMMER explizit (aus der
+# Quellen-Registry bzw. dem bewusst kurzen _DEFAULT_TTL), sodass dieser Floor dort
+# nie zum Tragen kommt. Der Floor verhindert lediglich, dass ein künftiger
+# Direktaufrufer versehentlich ein 60s-Notfenster erbt und bei kurzem
+# Upstream-Ausfall unnötig 503 statt stale-on-error liefert. Explizit übergebenes
+# ttl_stale wird davon NICHT berührt (kein Clamping nach oben).
+_DEFAULT_STALE_FLOOR = 86400.0
 
 # Lock-Lebensdauer (Sekunden) für den Single-Flight-Lock. Fällt ein Halter aus,
 # gibt die Redis-TTL den Lock automatisch wieder frei (kein Deadlock).
@@ -126,7 +149,7 @@ async def _store(redis, key: str, payload, ttl_fresh: float, ttl_stale: float) -
         "stale_until": now + ttl_stale,
     }
     # ex muss >= 1 sein; bei winzigem ttl_stale runden wir auf 1s auf.
-    ex = max(1, int(round(ttl_stale)))
+    ex = max(1, round(ttl_stale))
     await redis.set(key, orjson.dumps(value), ex=ex)
 
 
@@ -137,8 +160,23 @@ async def _refresh_and_store(
     ttl_stale: float,
     fetch: Callable[[], Awaitable],
 ) -> None:
-    """Single-Flight-Refresh-Coroutine: fetcht neu und speichert (Lock via ex aus)."""
-    payload = await fetch()
+    """Single-Flight-Refresh-Coroutine: fetcht neu und speichert (Lock via ex aus).
+
+    Der Fetch selbst darf NICHT durchfliegen: die Coroutine laeuft als losgeloester
+    Task (``_default_schedule``), eine Exception darin wird nie abgeholt und
+    landet als "Task exception was never retrieved" samt Traceback im Prod-Log
+    (Befund 2026-08-24: jeder BreakerOpen/ReadTimeout eines Hintergrund-Refresh
+    erzeugte so mehrere Traceback-Bloecke). Der Request-Pfad ist davon
+    unberuehrt: die STALE-Antwort ist schon raus, der Breaker hat den Fehler in
+    ``resilience/client.refresh`` bereits gezaehlt, und der Cache-Eintrag bleibt
+    einfach ungeschrieben (naechster Request laeuft in den normalen
+    MISS-/Stale-on-error-Pfad).
+    """
+    try:
+        payload = await fetch()
+    except Exception as exc:
+        log.info("cache_refresh_failed", key=key, error=type(exc).__name__)
+        return
     try:
         await _store(redis, key, payload, ttl_fresh, ttl_stale)
     except Exception as exc:
@@ -172,7 +210,9 @@ async def cache_get_or_set(
         key: vorab gebauter Cache-Key (siehe ``build_cache_key``).
         ttl: Fresh-Fenster in Sekunden. Innerhalb davon: HIT.
         fetch: parameterlose async-Funktion, die die frische Payload liefert.
-        ttl_stale: Stale-Fenster in Sekunden (Default: ttl + Mindest-Pad).
+        ttl_stale: Stale-Fenster in Sekunden. Default (nur bei Direktaufruf ohne
+            diesen Wert): ``max(ttl + Mindest-Pad, 24h-Floor)`` als
+            Defense-in-Depth. Explizit übergeben wird der Wert exakt respektiert.
         schedule: plant die Hintergrund-Refresh-Coroutine (Default: asyncio-Task).
 
     Returns:
@@ -188,7 +228,10 @@ async def cache_get_or_set(
         - Redis down: try/except -> direkter Fetch, kein Crash (MISS).
     """
     if ttl_stale is None:
-        ttl_stale = ttl + _DEFAULT_STALE_PAD
+        # Defense-in-Depth-Default (nur bei Direktaufrufen ohne explizites
+        # ttl_stale; Produktion setzt es via client.py IMMER explizit): mindestens
+        # der 24h-Floor, aber nie kleiner als der bisherige Pad (ttl + 60s).
+        ttl_stale = max(ttl + _DEFAULT_STALE_PAD, _DEFAULT_STALE_FLOOR)
     if schedule is None:
         schedule = _default_schedule
 

@@ -41,6 +41,14 @@ const py = [
     Muster <code>/api/v1/cities/&lbrace;slug&rbrace;/&lbrace;ressource&rbrace;</code>.
   </p>
   <p><code>{API_BASE}/api/v1</code></p>
+  <p>
+    Den exakten Slug musst du nicht kennen: der Stadtname wird tolerant aufgelöst,
+    also mit oder ohne Umlaute, in beliebiger Groß/Kleinschreibung und auch als
+    gängiger englischer Name oder Kurzform (<code>München</code>,
+    <code>munich</code>, <code>munchen</code> führen alle zu <code>muenchen</code>).
+    Ein unbekannter Name liefert einen 404 mit einem „Meintest du …?"-Hinweis auf
+    den nächstliegenden Slug.
+  </p>
 
   <h2>Schritt 2, erster Aufruf</h2>
   <p>

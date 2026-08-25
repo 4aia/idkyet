@@ -14,13 +14,83 @@ from __future__ import annotations
 
 import hashlib
 
-# Cache-Control-TTL je Ressource (Sekunden). default greift, wenn keine
-# spezifische Ressource passt. Additiv erweiterbar ohne Logik-Änderung.
+# Cache-Control-TTL je Datenart (Sekunden). Die Datenart ist das LETZTE
+# Pfadsegment (/api/v1/cities/<slug>/<datenart>), nicht das Bereichssegment
+# ("cities"). Unbekannte Segmente (Stadt-Slug, Listen-Endpunkte, hier nicht
+# gelistete Datenarten) fallen auf ``default`` zurück. Additiv erweiterbar ohne
+# Logik-Änderung. Bewusst NICHT gelistet und damit auf dem kurzen default:
+# Warnungen (weather-warnings, civil-protection-warnings), Semi-Live
+# (charging-status, power-load/-price, fuel-prices, office-wait-times,
+# bike-counts, station-departures/-arrivals) und "overview" (mischt
+# einen Live-Snapshot ein) - diese dürfen nie lange stale sein.
+DEFAULT_TTL = 300
+
+# ~6 h: Stammdaten, Infrastruktur-POIs, Geo und amtliche Statistik. Ändern sich
+# höchstens täglich (meist monatlich/jährlich); langes Fenster entlastet das
+# Origin, ETag/304 hält die Revalidierung billig.
+_LONG_TTL = 21600
+_LONG_RESOURCES = frozenset(
+    {
+        "base",
+        "geo",
+        "demographics",
+        "population-density",
+        "solar",
+        "solar-roofs",
+        "district-heating",
+        "heritage",
+        "education",
+        "playgrounds",
+        "drinking-water",
+        "public-toilets",
+        "markets",
+        "parcel-lockers",
+        "post-offices",
+        "post-boxes",
+        "public-wifi",
+        "recycling-centres",
+        "government-offices",
+        "tree-cadastre",
+        "hospitals-atlas",
+        "station-facilities",
+        "pois",
+        "land-values",
+        "tax-rates",
+        "holidays",
+        "election",
+        "unemployment",
+        "insolvencies",
+        "business-registrations",
+        "vehicle-registrations",
+        "accidents",
+        "crime-stats",
+        "tourism",
+        "construction",
+        "indicators",
+    }
+)
+
+# 30 min: Wetter/Umwelt, täglich/stündlich aktualisiert.
+_MEDIUM_TTL = 1800
+_MEDIUM_RESOURCES = frozenset(
+    {
+        "weather",
+        "pollen-uv",
+        "fire-danger",
+        "bathing-water",
+    }
+)
+
+# 10 min: Luftqualität (deprecated /cities-Aliase; die Live-Varianten unter
+# /live sind ohnehin no-store).
+_SHORT_TTL = 600
+_SHORT_RESOURCES = frozenset({"air", "air-uba"})
+
 CACHE_TTL = {
-    "dwd": 1800,
-    "uba": 600,
-    "wikidata": 86400,
-    "default": 300,
+    **dict.fromkeys(_LONG_RESOURCES, _LONG_TTL),
+    **dict.fromkeys(_MEDIUM_RESOURCES, _MEDIUM_TTL),
+    **dict.fromkeys(_SHORT_RESOURCES, _SHORT_TTL),
+    "default": DEFAULT_TTL,
 }
 
 # Ressourcen, die NIE am CDN/Browser zwischengespeichert werden dürfen ->
@@ -44,18 +114,23 @@ def compute_etag(body: bytes) -> str:
     return '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
 
 
-def cache_control_for(resource: str | None = None) -> str:
-    """Cache-Control-Wert je Ressource aus der CACHE_TTL-Map.
+def cache_control_for(resource: str | None = None, *, area: str | None = None) -> str:
+    """Cache-Control-Wert je Datenart aus der CACHE_TTL-Map.
 
+    ``resource`` ist die Datenart (letztes Pfadsegment); ``area`` das
+    Bereichssegment (/api/v1/<area>/...), das nur über ``no-store`` entscheidet.
     Wählt die passende max-age-TTL ("public, max-age=<ttl>"); fällt auf
-    ``default`` (300 s) zurück, wenn keine spezifische Ressource passt. Der
+    ``default`` (300 s) zurück, wenn die Datenart nicht in CACHE_TTL steht. Der
     Wert ist additiv erweiterbar, ohne die Middleware-Logik zu ändern.
 
-    Ressourcen in ``NO_STORE_RESOURCES`` (Echtzeit-Endpunkte /api/v1/live/*)
-    liefern stattdessen ``no-store``, damit Cloudflare/Browser sie nicht
-    zwischenspeichern (sonst werden Live-Daten bis zur CDN-Browser-TTL stale).
+    Ist der Bereich (oder ersatzweise die Datenart) in ``NO_STORE_RESOURCES``
+    (Echtzeit-Endpunkte /api/v1/live/*, /track), wird ``no-store`` geliefert,
+    damit Cloudflare/Browser sie nicht zwischenspeichern (sonst werden
+    Live-Daten bis zur CDN-Browser-TTL stale). Der no-store-Anker hängt am
+    Bereich, nicht an der Datenart: /live/<stadt>/departures endet auf
+    "departures", der Echtzeit-Charakter steckt allein in "live".
     """
-    if resource in NO_STORE_RESOURCES:
+    if area in NO_STORE_RESOURCES or resource in NO_STORE_RESOURCES:
         return "no-store"
     ttl = CACHE_TTL.get(resource or "default", CACHE_TTL["default"])
     # stale-while-revalidate + stale-if-error (Security-Härtung 2026-06-21):

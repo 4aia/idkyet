@@ -130,15 +130,15 @@ Version erfolgt über den gepinnten Git-Tag bzw. die `uv.lock`.
 
 ## Vollständiges Tool-Manifest
 
-12 Tools, die zusammen 67 Datenarten abdecken. Stadtbezogene Tools erwarten
+12 Tools, die zusammen 82 Datenarten abdecken. Stadtbezogene Tools erwarten
 einen `slug` (z.B. `berlin`, `hamburg`); gültige Slugs liefert `list_cities`.
 Ausnahmen sind unten markiert.
 
 | Tool | Argumente | Beschreibung | Quelle |
 | --- | --- | --- | --- |
 | `get_city` | `slug` | Base data for a German city (population, area, coordinates) | Wikidata |
-| `get_city_overview` | `slug` | One-call overview: base data, a catalog of all 67 data types with coverage status and the matching resource key, plus a live highlights snapshot (weather, air). Discovery entry point | InfraNode |
-| `get_city_resource` | `slug`, `resource` | Generic accessor: fetch ANY of the 67 data types by its resource key (kebab-case enum, see list below) | je Datenart |
+| `get_city_overview` | `slug` | One-call overview: base data, a catalog of all 82 data types with coverage status and the matching resource key, plus a live highlights snapshot (weather, air). Discovery entry point | InfraNode |
+| `get_city_resource` | `slug`, `resource` | Generic accessor: fetch ANY of the 82 data types by its resource key (kebab-case enum, see list below) | je Datenart |
 | `air_quality` | `slug` | Official air quality (PM10, PM2.5, NO2, O3, SO2) | UBA |
 | `weather` | `slug` | Current weather observations (not a forecast) | DWD |
 | `pois` | `slug`, `type` | Points of interest, filtered by type | OpenStreetMap |
@@ -158,7 +158,7 @@ Das `pois`-Tool nimmt zusätzlich `type` aus der API-Whitelist (z.B. `hospital`,
 Alle Datenarten ohne eigenes Tool holt der Agent über
 `get_city_resource(slug, resource="<schlüssel>")`. Beispiel:
 `get_city_resource(slug="berlin", resource="charging")` liefert die Ladesäulen
-in Berlin. Der `resource`-Parameter ist ein Enum mit 67 Schlüsseln
+in Berlin. Der `resource`-Parameter ist ein Enum mit 78 Schlüsseln
 (kebab-case). Welche Schlüssel eine Stadt abdeckt, zeigt
 `get_city_overview(slug)` (je Datenart Schlüssel plus Abdeckungsstatus); die
 Resource `infranode://catalog` listet alle Datenarten. Einige Datenarten haben
@@ -185,6 +185,10 @@ generischen Zugriff erreichbar.
 | `charging-status` | Live-Ladesäulen-Belegung je Stadt (eRound, alle 84 Städte) |
 | `road-events` | Innerstädtische Baustellen und Sperrungen (Teilabdeckung) |
 | `parking` | Live-Parkbelegung (Dortmund, Frankfurt am Main, Wuppertal) |
+| `parking-onstreet` | Straßenparkraum: Stellplätze und Parkregelung je Straßenabschnitt, Parkraummanagementgebiete, Behindertenparkplätze, Lieferzonen (nur München) |
+| `park-and-ride` | P+R- und B+R-Anlagen: Stellplätze, Preise, ÖPNV-Anbindung, Belegungsprognose (nur München) |
+| `mobility-points` | Mobilitätspunkte und Carsharing-Parkflächen (nur München) |
+| `bike-parking` | Radabstellanlagen: Bestand, Stellplätze, Bauform, Bike-and-Ride (nur München) |
 | `vehicle-registrations` | Pkw-Bestand und Elektroauto-Anteil (KBA) |
 | `accidents` | Verkehrsunfälle je Kreis, jährlich (Unfallatlas) |
 | `crime-stats` | Kriminalstatistik je Hauptstraftatengruppe (BKA PKS) |
@@ -199,7 +203,6 @@ generischen Zugriff erreichbar.
 | `flood` | Hochwasser-Warnstufen (Länderhochwasserportal, Teilabdeckung) |
 | `bathing-water` | Badegewässerqualität im Umkreis (EEA) |
 | `health` | Krankenhausverzeichnis (Regionalstatistik) |
-| `icu-live` | Intensivbetten-Belegung, Live (DIVI) |
 | `hospitals-atlas` | Krankenhausstandorte aus dem Bundes-Klinik-Atlas |
 | `energy` | Energieanlagen (Marktstammdatenregister) |
 | `power-load` | Tägliche Netzlast der Regelzone (SMARD) |
@@ -211,6 +214,16 @@ generischen Zugriff erreichbar.
 | `tourism` | Gästeübernachtungen und Ankünfte je Kreis (Regionalstatistik) |
 | `construction` | Baugenehmigungen je Kreis (Regionalstatistik) |
 | `indicators` | Sozialökonomische Indikatoren je Kreis (INKAR/BBSR) |
+| `sustainability` | Nachhaltigkeit und SDG-Indikatoren je Gemeinde, Zeitreihe 2006-2023 (Wegweiser Kommune, CC0) |
+| `population-structure` | Altersaufbau je Stadt als Zeitreihe: Zahl und Anteil je Altersgruppe, nach Geschlecht und Generation, Ist ab 2006 und Prognose bis 2040 (Wegweiser Kommune, CC0) |
+| `population-trend` | Bevoelkerungsentwicklung als Zeitreihe: Veraenderung der Altersgruppen, Geburten- und Sterberate, Wanderungssaldo (Wegweiser Kommune, CC0) |
+| `municipal-finance` | Kommunale Finanzen als Zeitreihe: Hebesaetze, Steuerkraft, Schulden, Investitionen, Sozialausgaben (Wegweiser Kommune, CC0) |
+| `labour-market` | Arbeitsmarkt und Pendler als Zeitreihe: Arbeitslosen- und Beschaeftigungsquoten, Ein- und Auspendler (Wegweiser Kommune, CC0) |
+| `integration` | Integration als Zeitreihe: Bevoelkerungsanteile, Beschaeftigung, Bildung, Einbuergerungen (Wegweiser Kommune, CC0) |
+| `childcare` | Kinderbetreuung als Zeitreihe: Betreuungsquoten nach Alter, Betreuungsform und Umfang, 83 Staedte (Wegweiser Kommune, CC0) |
+| `education-stats` | Bildungsstatistik als Zeitreihe: Schulabschluesse, Auszubildende, Weiterbildung, 70 Staedte (Wegweiser Kommune, CC0) |
+| `social-situation` | Soziale Lage als Zeitreihe: SGB-II-Quoten, Altersarmut, Grundsicherung, Schuldnerquote (Wegweiser Kommune, CC0) |
+| `care` | Pflege als Zeitreihe: Pflegebeduerftige, Pflegequote, ambulant und stationaer, Vorausberechnung bis 2030, 73 Staedte (Wegweiser, CC0) |
 | `land-values` | Amtliche Bodenrichtwerte, aggregiert (BORIS, Teilabdeckung) |
 | `tax-rates` | Realsteuer-Hebesätze je Gemeinde (Regionalstatistik) |
 | `business-registrations` | Gewerbean-/-abmeldungen und Saldo je Kreis (Regionalstatistik) |
@@ -244,6 +257,16 @@ Jedes Tool gibt den kanonischen Envelope zurück: `data` enthält die Nutzdaten
 plus Herkunft/Lizenz/Attribution, `meta` enthält Correlation-ID, Quell-Status
 und Cache-Status. Die folgenden Ausgaben sind echte, gekürzte Antworten der
 Live-API.
+
+Feldnamen sind durchgängig snake_case und englisch, gleiche Konzepte heißen
+überall gleich (`post_code`, `street`, `house_number`, `place`, `name`,
+`start`, `end`, `distance_km`, `power_kw`, `lat`, `lon`). `post_code` ist immer
+ein fünfstelliger String, Zeitstempel tragen eine Zeitzone, eine fehlende
+Angabe ist `null` statt Leerstring. Ältere Doppelnamen (`plz`, `zip`,
+`strasse`, `hausnummer`, `ort`, `city`, `bezeichnung`, `beginn`, `ende`, `art`,
+`dist_km`, `leistung_kw`, `einheit_typ` sowie die camelCase-Rohfelder der
+Autobahn-Verkehrsmeldungen) tragen denselben Wert, sind aber abgekündigt. Die
+Konventionen stehen maschinenlesbar in der Resource `infranode://catalog`.
 
 `get_city_overview(slug="berlin")` , the discovery entry point, start here for any
 city question instead of guessing a single tool:
@@ -390,6 +413,15 @@ Tool  -> Agent: HTTP 404
                   }
                 }
 ```
+
+Stadt-Slugs werden tolerant aufgelöst: der deutsche Name mit oder ohne Umlaute,
+beliebige Groß/Kleinschreibung, gängige englische Exonyme und Kurzformen führen
+zum kanonischen Slug (`München`/`münchen`/`munich`/`munchen` -> `muenchen`,
+`cologne` -> `koeln`, `frankfurt` -> `frankfurt-am-main`). Ein Agent muss die
+ASCII-Schreibweise also nicht kennen. Nur ein wirklich unbekannter Name (wie
+`atlantis` oben, kein naher Treffer) liefert den generischen 404; bei einem
+Tippfehler nennt der `hint` stattdessen den nächstliegenden Slug
+(`Meintest du 'muenchen'?`).
 
 Lokaler Fehlerfall vor jedem Request: ein Slug mit Pfad-/Host-Anteilen (z.B.
 `get_city(slug="berlin/../admin")`) löst im Client einen `ValueError`

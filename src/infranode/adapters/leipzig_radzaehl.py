@@ -1,4 +1,4 @@
-"""Leipzig-Radzählstellen-Adapter ``fetch_leipzig_radzaehl`` (DATA-40, Tier A).
+"""Leipzig-Radzählstellen-Adapter ``fetch_leipzig_bike_counts`` (DATA-40, Tier A).
 
 Liefert die Stunden-Radzählwerte der Leipziger Dauerzählstellen (~26 Stationen)
 keylos als kanonisches Zählstellen-dict. Zwei OpenData-WFS-Layer der Stadt Leipzig
@@ -96,7 +96,7 @@ def _latest_counts(text: str) -> dict[str, dict]:
     return latest
 
 
-async def fetch_leipzig_radzaehl(
+async def fetch_leipzig_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,
@@ -107,13 +107,13 @@ async def fetch_leipzig_radzaehl(
     """Holt die Leipziger Rad-Stundenzählwerte (Standort-GeoJSON + Werte-CSV).
 
     Step 1: Standorte (stationid -> name/Koordinaten). Ohne Standorte -> leeres
-    Ergebnis (kein CSV-Fetch). Step 2: Stundenwert-CSV laden (cp1252), je Station
+    Ergebnis (kein CSV-Fetch). Step 2: Stundenwert-CSV laden (utf-8), je Station
     den jüngsten ``phenomenontime`` extrahieren. Join über ``stationid``.
 
     ``lat``/``lon``/``radius_km`` sind vertragskonform Teil der Signatur (alle
     Stadt-Adapter teilen sie); Leipzig liefert den kompletten Stadt-Datensatz.
 
-    Rückgabe-Keys (exakt das, was ``map_leipzig_radzaehl`` erwartet): ``slug``,
+    Rückgabe-Keys (exakt das, was ``map_leipzig_bike_counts`` erwartet): ``slug``,
     ``stations`` (je Station name/lat/lon/value/period) und ``as_of`` (jüngster
     ``phenomenontime`` als ISO-String oder None).
     """

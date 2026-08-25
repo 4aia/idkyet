@@ -35,9 +35,8 @@ from __future__ import annotations
 from infranode.adapters.autobahn import _CITY_ROADS
 from infranode.adapters.baumkataster import BAUM_WFS
 from infranode.adapters.boris import BORIS_SHAPEFILE, BORIS_WFS
-from infranode.adapters.denkmal import DENKMAL_WFS
+from infranode.adapters.denkmal import HERITAGE_WFS
 from infranode.adapters.lhp import _CITY_PEGEL
-from infranode.adapters.parkendd import PARKENDD_CITIES
 from infranode.registry.cities import CITY_REGISTRY
 
 # road-events: gespiegelt aus ``api.v1.cities.CONNECTOR_MAP`` (siehe Modul-Docstring).
@@ -53,6 +52,7 @@ _ROAD_EVENTS_CITIES: frozenset[str] = frozenset(
         "dortmund",
         "dresden",
         "leipzig",
+        "rostock",
     }
 )
 
@@ -87,6 +87,7 @@ _SHARING_CITIES: frozenset[str] = frozenset(
         "ludwigshafen-am-rhein",
         "hanau",
         "leverkusen",
+        "kiel",
     }
 )
 
@@ -114,18 +115,50 @@ _SOLAR_ROOFS_CITIES: frozenset[str] = frozenset(
     c.slug for c in CITY_REGISTRY if c.state in _SOLAR_CADASTRE_STATES
 )
 
-# parking (DATA-40): EIN Parking-Endpunkt mit Quellen-Fallback (Dedup-Prinzip).
-# Bevorzugt ParkenDD-Live-Belegung (aus ``adapters.parkendd.PARKENDD_CITIES``
-# abgeleitet, 22 Städte), zusätzlich München über den statischen CKAN-
-# Standortkatalog (Fallback ohne Live-Belegung). Eine neue ParkenDD-Stadt
-# erweitert die Abdeckung automatisch. Seit 2026-07-02 (Lücken-Schluss Top-12)
-# zusätzlich die drei Mobilithek-mTLS-Städte, deren Quellen vorher NUR als
-# /live-Routen verdrahtet waren (``_MOBILITHEK_PARKING`` in api/v1/cities.py,
-# muss mit dieser Menge synchron bleiben).
-_PARKING_CITIES: frozenset[str] = (
-    frozenset(PARKENDD_CITIES)
-    | {"muenchen"}
-    | {"frankfurt-am-main", "wuppertal", "magdeburg"}
+# parking (DATA-40 / PARK-08): EIN Parking-Endpunkt je Stadt mit kuratierter
+# Direktquelle. Diese Menge MUSS deckungsgleich zur ``PARKING_CONNECTORS``-Registry in
+# api/v1/cities.py bleiben (der dortige Drift-Guard erzwingt es); eine neue Parkstadt
+# wird in BEIDEN ergänzt. Quellen je Stadt: Stadt-OpenData-Direkt (dortmund/aachen/
+# muenster/oldenburg/kaiserslautern/karlsruhe), MobiData BW ParkAPI (freiburg-im-
+# breisgau/heidelberg/heilbronn/ulm), statischer CKAN-Katalog (muenchen), Mobilithek
+# DATEX II (frankfurt-am-main/wuppertal/magdeburg/koeln, koeln seit 2026-07-23 direkt
+# statt ParkenDD), Hamburg-Urban-Platform-WFS (hamburg) und der Übergangs-Aggregator
+# für die noch nicht direkt angebundene Stadt (dresden, bis 25-08).
+_PARKING_CITIES: frozenset[str] = frozenset(
+    {
+        "dortmund",
+        "aachen",
+        "muenster",
+        "oldenburg",
+        "kaiserslautern",
+        "karlsruhe",
+        "freiburg-im-breisgau",
+        "heidelberg",
+        "heilbronn",
+        "ulm",
+        "muenchen",
+        "frankfurt-am-main",
+        "wuppertal",
+        "magdeburg",
+        "dresden",
+        "hamburg",
+        "koeln",
+        # DB BahnPark statischer Katalog (Register-Städte ohne andere Parken-Quelle)
+        "berlin",
+        "bochum",
+        "bonn",
+        "bremen",
+        "duesseldorf",
+        "duisburg",
+        "erfurt",
+        "essen",
+        "hannover",
+        "mainz",
+        "saarbruecken",
+        "schwerin",
+        "stuttgart",
+        "wiesbaden",
+    }
 )
 
 # bike-counts (DATA-40): kommunale Radzählstellen-Open-Data je Stadt (KEIN
@@ -149,8 +182,8 @@ _BIKE_COUNTS_CITIES: frozenset[str] = frozenset(
 # heritage (DATA-OSM-Tier-2): Denkmallisten sind LANDESsache -> föderiert per WFS
 # (wie BORIS/solar-roofs). Abgedeckt sind die Register-Städte, deren Bundesland
 # (``state``) einen verifizierten, offen lizenzierten Denkmal-WFS hat
-# (``DENKMAL_WFS``). Ein neues Land erweitert die Abdeckung automatisch.
-_HERITAGE_STATES = set(DENKMAL_WFS)
+# (``HERITAGE_WFS``). Ein neues Land erweitert die Abdeckung automatisch.
+_HERITAGE_STATES = set(HERITAGE_WFS)
 _HERITAGE_CITIES: frozenset[str] = frozenset(
     c.slug for c in CITY_REGISTRY if c.state in _HERITAGE_STATES
 )
@@ -173,8 +206,284 @@ _DISTRICT_HEATING_CITIES: frozenset[str] = frozenset({"berlin", "hamburg"})
 # ehrlich not_covered (200, kein 404). Waechst additiv je integrierter Stadt.
 _OFFICE_WAIT_TIMES_CITIES: frozenset[str] = frozenset({"koeln"})
 
+# Quick-260729-muc: ruhender Verkehr Muenchen. Drei Datenarten aus den offenen
+# Quellen der Landeshauptstadt (WFS Mobilitaetsreferat + CKAN P+R GmbH). Aktuell
+# NUR muenchen; andere Staedte liefern ehrlich not_covered (200, kein 404).
+# Waechst additiv je integrierter Stadt.
+_PARKING_ONSTREET_CITIES: frozenset[str] = frozenset({"muenchen"})
+_PARK_AND_RIDE_CITIES: frozenset[str] = frozenset({"muenchen"})
+_MOBILITY_POINT_CITIES: frozenset[str] = frozenset({"muenchen"})
+_BIKE_PARKING_CITIES: frozenset[str] = frozenset({"muenchen"})
+
+# council-papers (Quick-260708-tsv): kommunale Ratsinformationen (OParl) je Stadt.
+# Teilabdeckung = die acht lizenzgeklärten Städte (fail-closed, KEINE weiteren).
+# Deckungsgleich zu mappers.oparl.COVERED_COUNCIL_CITIES (dort Single Source of
+# Truth für Route + Lizenz); hier als eigene Konstante gespiegelt, damit die
+# coverage-Karte ohne Import-Zyklus lädt.
+_COUNCIL_CITIES: frozenset[str] = frozenset(
+    {
+        "dresden",
+        "koeln",
+        "duesseldorf",
+        "muenster",
+        "leipzig",
+        "magdeburg",
+        "osnabrueck",
+        "freiburg-im-breisgau",
+    }
+)
+
 # Single source of truth: Endpunkt-Kennung -> abgedeckte Stadt-Slugs.
 # Die Kennung entspricht dem letzten Pfadsegment der Route (``/cities/{slug}/<key>``).
+# Kinderbetreuung (Wegweiser, CC0): 83 der 84 Register-Staedte. Reutlingen
+# fuehrt die Quelle nicht gemeindescharf. Aus dem Bestand abgeleitet
+# (2026-07-28), nicht geraten.
+_WEGWEISER_CHILDCARE_CITIES: frozenset[str] = frozenset(
+    {
+        "aachen",
+        "augsburg",
+        "bergisch-gladbach",
+        "berlin",
+        "bielefeld",
+        "bochum",
+        "bonn",
+        "bottrop",
+        "braunschweig",
+        "bremen",
+        "bremerhaven",
+        "chemnitz",
+        "cottbus",
+        "darmstadt",
+        "dortmund",
+        "dresden",
+        "duesseldorf",
+        "duisburg",
+        "erfurt",
+        "erlangen",
+        "essen",
+        "frankfurt-am-main",
+        "freiburg-im-breisgau",
+        "fuerth",
+        "gelsenkirchen",
+        "goettingen",
+        "guetersloh",
+        "hagen",
+        "halle-saale",
+        "hamburg",
+        "hamm",
+        "hanau",
+        "hannover",
+        "heidelberg",
+        "heilbronn",
+        "herne",
+        "hildesheim",
+        "ingolstadt",
+        "jena",
+        "kaiserslautern",
+        "karlsruhe",
+        "kassel",
+        "kiel",
+        "koblenz",
+        "koeln",
+        "krefeld",
+        "leipzig",
+        "leverkusen",
+        "ludwigshafen-am-rhein",
+        "luebeck",
+        "magdeburg",
+        "mainz",
+        "mannheim",
+        "moenchengladbach",
+        "moers",
+        "muelheim-an-der-ruhr",
+        "muenchen",
+        "muenster",
+        "neuss",
+        "nuernberg",
+        "oberhausen",
+        "offenbach-am-main",
+        "oldenburg",
+        "osnabrueck",
+        "paderborn",
+        "pforzheim",
+        "potsdam",
+        "recklinghausen",
+        "regensburg",
+        "remscheid",
+        "rostock",
+        "saarbruecken",
+        "salzgitter",
+        "schwerin",
+        "siegen",
+        "solingen",
+        "stuttgart",
+        "trier",
+        "ulm",
+        "wiesbaden",
+        "wolfsburg",
+        "wuerzburg",
+        "wuppertal",
+    }
+)
+
+# Bildungsstatistik (Wegweiser, CC0): 70 Staedte. Es fehlen genau die 14
+# kreisangehoerigen Register-Staedte, weil die Quelle Schul- und
+# Ausbildungsdaten erst ab Kreisebene fuehrt.
+_WEGWEISER_EDUCATION_CITIES: frozenset[str] = frozenset(
+    {
+        "augsburg",
+        "berlin",
+        "bielefeld",
+        "bochum",
+        "bonn",
+        "bottrop",
+        "braunschweig",
+        "bremen",
+        "bremerhaven",
+        "chemnitz",
+        "cottbus",
+        "darmstadt",
+        "dortmund",
+        "dresden",
+        "duesseldorf",
+        "duisburg",
+        "erfurt",
+        "erlangen",
+        "essen",
+        "frankfurt-am-main",
+        "freiburg-im-breisgau",
+        "fuerth",
+        "gelsenkirchen",
+        "hagen",
+        "halle-saale",
+        "hamburg",
+        "hamm",
+        "heidelberg",
+        "heilbronn",
+        "herne",
+        "ingolstadt",
+        "jena",
+        "kaiserslautern",
+        "karlsruhe",
+        "kassel",
+        "kiel",
+        "koblenz",
+        "koeln",
+        "krefeld",
+        "leipzig",
+        "leverkusen",
+        "ludwigshafen-am-rhein",
+        "luebeck",
+        "magdeburg",
+        "mainz",
+        "mannheim",
+        "moenchengladbach",
+        "muelheim-an-der-ruhr",
+        "muenchen",
+        "muenster",
+        "nuernberg",
+        "oberhausen",
+        "offenbach-am-main",
+        "oldenburg",
+        "osnabrueck",
+        "pforzheim",
+        "potsdam",
+        "regensburg",
+        "remscheid",
+        "rostock",
+        "salzgitter",
+        "schwerin",
+        "solingen",
+        "stuttgart",
+        "trier",
+        "ulm",
+        "wiesbaden",
+        "wolfsburg",
+        "wuerzburg",
+        "wuppertal",
+    }
+)
+
+# Pflege (Wegweiser, CC0): 73 Staedte, die uebrigen fuehrt die Quelle erst
+# ab Kreisebene.
+_WEGWEISER_CARE_CITIES: frozenset[str] = frozenset(
+    {
+        "aachen",
+        "augsburg",
+        "berlin",
+        "bielefeld",
+        "bochum",
+        "bonn",
+        "bottrop",
+        "braunschweig",
+        "bremen",
+        "bremerhaven",
+        "chemnitz",
+        "cottbus",
+        "darmstadt",
+        "dortmund",
+        "dresden",
+        "duesseldorf",
+        "duisburg",
+        "erfurt",
+        "erlangen",
+        "essen",
+        "frankfurt-am-main",
+        "freiburg-im-breisgau",
+        "fuerth",
+        "gelsenkirchen",
+        "hagen",
+        "halle-saale",
+        "hamburg",
+        "hamm",
+        "hannover",
+        "heidelberg",
+        "heilbronn",
+        "herne",
+        "ingolstadt",
+        "jena",
+        "kaiserslautern",
+        "karlsruhe",
+        "kassel",
+        "kiel",
+        "koblenz",
+        "koeln",
+        "krefeld",
+        "leipzig",
+        "leverkusen",
+        "ludwigshafen-am-rhein",
+        "luebeck",
+        "magdeburg",
+        "mainz",
+        "mannheim",
+        "moenchengladbach",
+        "muelheim-an-der-ruhr",
+        "muenchen",
+        "muenster",
+        "nuernberg",
+        "oberhausen",
+        "offenbach-am-main",
+        "oldenburg",
+        "osnabrueck",
+        "pforzheim",
+        "potsdam",
+        "regensburg",
+        "remscheid",
+        "rostock",
+        "saarbruecken",
+        "salzgitter",
+        "schwerin",
+        "solingen",
+        "stuttgart",
+        "trier",
+        "ulm",
+        "wiesbaden",
+        "wolfsburg",
+        "wuerzburg",
+        "wuppertal",
+    }
+)
+
 PARTIAL_COVERAGE: dict[str, frozenset[str]] = {
     "flood": frozenset(_CITY_PEGEL),
     "webcams": frozenset(_CITY_ROADS),
@@ -188,8 +497,29 @@ PARTIAL_COVERAGE: dict[str, frozenset[str]] = {
     "heritage": _HERITAGE_CITIES,
     "tree-cadastre": _TREE_CADASTRE_CITIES,
     "district-heating": _DISTRICT_HEATING_CITIES,
+    "childcare": _WEGWEISER_CHILDCARE_CITIES,
+    "education-stats": _WEGWEISER_EDUCATION_CITIES,
+    "care": _WEGWEISER_CARE_CITIES,
     "office-wait-times": _OFFICE_WAIT_TIMES_CITIES,
+    "council-papers": _COUNCIL_CITIES,
+    "parking-onstreet": _PARKING_ONSTREET_CITIES,
+    "park-and-ride": _PARK_AND_RIDE_CITIES,
+    "mobility-points": _MOBILITY_POINT_CITIES,
+    "bike-parking": _BIKE_PARKING_CITIES,
 }
+
+# Drift-Schutz: die gespiegelte council-papers-Liste MUSS deckungsgleich mit der
+# Single Source of Truth im Mapper sein (mappers.oparl importiert nichts aus
+# diesem Modul -> kein Import-Zyklus). Fängt eine hier vergessene Stadt hart ab.
+from infranode.normalization.mappers.oparl import (  # noqa: E402
+    COVERED_COUNCIL_CITIES as _MAPPER_COUNCIL_CITIES,
+)
+
+if _COUNCIL_CITIES != _MAPPER_COUNCIL_CITIES:
+    raise RuntimeError(
+        "council-papers coverage drift: registry.coverage._COUNCIL_CITIES != "
+        "mappers.oparl.COVERED_COUNCIL_CITIES"
+    )
 
 
 def is_covered(endpoint: str, slug: str) -> bool:

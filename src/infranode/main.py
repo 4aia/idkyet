@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -36,13 +36,20 @@ from .config import get_settings
 from .infra.etag import cache_control_for, compute_etag
 from .infra.gpt_actions import is_gpt_action
 from .infra.http import close_http_client, create_http_client
-from .infra.metrics import incr_daily, incr_request, push_log, record_consumer
+from .infra.metrics import (
+    incr_daily,
+    incr_request,
+    push_error_log,
+    push_log,
+    record_consumer,
+)
 from .infra.mobilithek import close_mobilithek_client, create_mobilithek_client
 from .infra.redis import close_redis_pool, create_redis_pool
 from .logging import configure_logging
+from .ops.notify import Severity, notify
 from .resilience.breaker_redis import RedisBreakerRegistry
 from .resilience.client import ResilientSourceClient
-from .transit.poller import maybe_start_gtfs_rt_poller
+from .transit.poller import maybe_start_gtfs_rt_poller, maybe_start_vbb_poller
 
 log = structlog.get_logger()
 
@@ -57,25 +64,6 @@ async def lifespan(app: FastAPI):
     )
     # Ein prozessweiter, gepoolter httpx-AsyncClient für alle Upstreams (RES-01/05).
     app.state.http = create_http_client(settings)
-    # Dedizierter mTLS-Client NUR für Mobilithek (LIVE-04, T-20-MTLS): das
-    # Client-Cert darf nie an fremde Hosts gehen, daher ein SEPARATER Client,
-    # NICHT app.state.http. Graceful Degradation: ohne Cert + Passwort kein Pull
-    # (None), die Live-Routen liefern dann source_status="disabled".
-    if settings.mobilithek_cert_path and settings.mobilithek_cert_password:
-        # Fail-open statt Crash (RES-Kernprinzip): ein fehlendes/defektes Cert
-        # (z. B. Volume-Mount vergessen) darf NIE den App-Start verhindern.
-        # Live-Routen degradieren dann zu source_status="disabled".
-        try:
-            app.state.mobilithek_http = create_mobilithek_client(settings)
-        except (OSError, ValueError) as exc:
-            log.warning(
-                "mobilithek_client_init_failed",
-                error=str(exc),
-                cert_path=str(settings.mobilithek_cert_path),
-            )
-            app.state.mobilithek_http = None
-    else:
-        app.state.mobilithek_http = None
     # Prozessweites Task-Set für SWR-Background-Refresh (Pitfall 3, Plan 03/04).
     app.state.bg_tasks = set()
     # Prozessweite, Redis-persistente Breaker-Registry: Breaker-State MUSS
@@ -103,12 +91,71 @@ async def lifespan(app: FastAPI):
         breakers=app.state.breakers,
         schedule=_schedule,
     )
+    # Dedizierter mTLS-Client NUR für Mobilithek (LIVE-04, T-20-MTLS): das
+    # Client-Cert darf nie an fremde Hosts gehen, daher ein SEPARATER Client,
+    # NICHT app.state.http. Graceful Degradation: ohne Cert + Passwort kein Pull
+    # (None), die Live-Routen liefern dann source_status="disabled". Steht NACH
+    # _schedule (fire-and-forget-Alarm) und VOR maybe_start_gtfs_rt_poller (das
+    # app.state.mobilithek_http liest).
+    if settings.mobilithek_cert_path and settings.mobilithek_cert_password:
+        # Fail-open statt Crash (RES-Kernprinzip): ein fehlendes/defektes Cert
+        # (z. B. Volume-Mount vergessen) darf NIE den App-Start verhindern.
+        # Live-Routen degradieren dann zu source_status="disabled".
+        try:
+            app.state.mobilithek_http = create_mobilithek_client(settings)
+        except (OSError, ValueError) as exc:
+            log.warning(
+                "mobilithek_client_init_failed",
+                error=str(exc),
+                cert_path=str(settings.mobilithek_cert_path),
+            )
+            app.state.mobilithek_http = None
+            # Lauter Alarm: ein stiller mTLS-Init-Fehler (Verzeichnisrechte,
+            # defektes Cert) hat den GTFS-RT-Poller heute unbemerkt lahmgelegt.
+            # Ein ntfy-Push (fire-and-forget via _schedule, blockiert den Start
+            # nie) macht das sofort sichtbar; notify hat interne Fehlerbehandlung
+            # je Kanal. Nur type(exc).__name__ nennen (kein str(exc), T-15-LEAK).
+            # Alarm nie start-kritisch -> Fehler unterdruecken.
+            with suppress(Exception):
+                _schedule(
+                    asyncio.to_thread(
+                        notify,
+                        severity=Severity.WARNING,
+                        subject="InfraNode: Mobilithek-mTLS-Init fehlgeschlagen",
+                        body=(
+                            "Der mTLS-Client fuer die Mobilithek konnte beim "
+                            "App-Start nicht initialisiert werden "
+                            f"({type(exc).__name__}). DELFI-GTFS-RT und eRound "
+                            "laufen bis zur Behebung ohne mTLS (disabled). "
+                            "Bitte Cert-Pfad und Verzeichnisrechte pruefen."
+                        ),
+                    )
+                )
+            # Lesbares Redis-Statusflag (persistent, kein TTL): Ops/Watchdog
+            # kann den Init-Status abfragen (ohne str(exc), T-15-LEAK).
+            # Statusflag nie start-kritisch -> Redis-Fehler unterdruecken.
+            with suppress(Exception):
+                await app.state.redis.set(
+                    "mobilithek_client_status", f"failed:{type(exc).__name__}"
+                )
+        else:
+            # Erfolgreicher Init -> lesbares ok-Flag (persistent, kein TTL).
+            # Statusflag nie start-kritisch -> Redis-Fehler unterdruecken.
+            with suppress(Exception):
+                await app.state.redis.set("mobilithek_client_status", "ok")
+    else:
+        app.state.mobilithek_http = None
     # GTFS-RT-Hintergrund-Poller (Phase 19): parst den Feed EINMAL je Kadenz nach
     # Redis (NIE im Request-Pfad, T-19-REQPARSE). Wird nur bei enable_gtfs_rt True
     # + auflösbarer Quelle gestartet (gtfs_de immer; mobilithek_delfi nur mit Cert
     # + Abo-ID); nutzt das bestehende _schedule/bg_tasks-Muster (GC-Schutz). Bei
     # Default (enable_gtfs_rt False) entsteht KEIN Task (kein Verhaltensbruch).
     maybe_start_gtfs_rt_poller(app, settings, _schedule)
+    # Keyloser Berliner VBB-RT-Poller (quick-260707-kzd): eigener Keyspace
+    # transit_rt:vbb:, eigener Lock/Heartbeat, NUR bei enable_vbb (Default aus ->
+    # kein Task). Laesst Berliner Live-Abfahrten aufleuchten, ohne den bundesweiten
+    # DELFI-/gtfs.de-Pfad zu beruehren.
+    maybe_start_vbb_poller(app, settings, _schedule)
     # eRound-Belegungs-Poller (DATA-42): akkumuliert die Drain-Queue-Deltas des
     # dynamischen eRound-Abos in Redis (Muster GTFS-RT-Poller). Nur bei aktivem
     # enable_eround_charging + Cert + Abo-ID; sonst KEIN Task (kein Verhaltensbruch).
@@ -173,7 +220,12 @@ class ETagMiddleware(BaseHTTPMiddleware):
 
         # Finalen Body aus dem Streaming-Iterator zusammenführen (BaseHTTPMiddleware
         # liefert eine StreamingResponse), ohne ihn für den Client zu verlieren.
-        body = b"".join([chunk async for chunk in response.body_iterator])
+        # BaseHTTPMiddleware liefert intern immer eine _StreamingResponse mit
+        # body_iterator; call_next ist statisch aber nur als Response typisiert.
+        body_iterator = getattr(response, "body_iterator", None)
+        if body_iterator is None:
+            return response
+        body = b"".join([chunk async for chunk in body_iterator])
 
         # ETag über den STABILEN Ressourcen-Inhalt: die per-Request neu erzeugte
         # correlation_id (meta.correlation_id) ist Request-Rauschen und darf den
@@ -182,11 +234,27 @@ class ETagMiddleware(BaseHTTPMiddleware):
         # AUSGELIEFERTE Body behält die echte ID unverändert.
         etag = compute_etag(_etag_payload(body, correlation_id.get()))
         response.headers["ETag"] = etag
-        # Ressource aus dem Pfadsegment nach /api/v1/<resource> ableiten; fällt
-        # in cache_control_for auf default zurück, wenn unbekannt.
+        # Zwei Segmente ableiten: der BEREICH (Segment nach /api/v1, z.B.
+        # "cities"/"live"/"track") entscheidet über no-store; die DATENART (das
+        # letzte Segment, z.B. "weather"/"demographics") wählt die TTL. Bei
+        # flachen Endpunkten (/sources) fallen beide zusammen. Der no-store-Anker
+        # MUSS am Bereich hängen: /live/<stadt>/departures endet auf "departures",
+        # nur "live" markiert den Echtzeit-Charakter. cache_control_for fällt auf
+        # default zurück, wenn die Datenart unbekannt ist (Slug, Listen-Endpunkt).
         parts = [p for p in request.url.path.split("/") if p]
-        resource = parts[2] if len(parts) > 2 else None
-        response.headers["Cache-Control"] = cache_control_for(resource)
+        area = parts[2] if len(parts) > 2 else None
+        resource = parts[-1] if len(parts) > 3 else area
+        # GPT-Actions-Requests bekommen IMMER no-store: seit PR #35 bindet
+        # parse_page_params bei GPT-Signal das Default-limit (50), REST bleibt
+        # voll. Dieselbe URL liefert also kanal-abhaengig unterschiedlich viele
+        # Eintraege. Landete diese gebundene Variante in einem shared Cache
+        # (Edge/Proxy), gaebe es Cache-Poisoning in beide Richtungen (REST
+        # bekaeme die 50er-Variante, GPT die MB-grosse Vollantwort). ETag/304
+        # bleiben unberuehrt, no-store betrifft nur den Cache-Control-Header.
+        if is_gpt_action(request.headers):
+            response.headers["Cache-Control"] = "no-store"
+        else:
+            response.headers["Cache-Control"] = cache_control_for(resource, area=area)
 
         # Conditional GET: If-None-Match == ETag -> 304 ohne Body. Header
         # (ETag/Cache-Control + bestehende, z.B. Correlation-ID) bleiben erhalten.
@@ -211,6 +279,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     Methode, Pfad, Status, Dauer, request_id) in den gekappten Redis-Ringpuffer
     plus einen Request-Zähler (gesamt + Status + Endpunkt). Es landen NUR
     Request-Metadaten im Buffer, NIE Header/Body/Cookies (T-13-02-06).
+    Requests mit Status >= 400 landen zusätzlich im eigenen Fehler-Ringpuffer
+    (``metrics:errlog``), damit der normale Traffic sie nicht rausspült.
 
     Reihenfolge (Pitfall 1/5): MetricsMiddleware braucht den finalen Status UND die
     correlation_id. ``CorrelationIdMiddleware`` muss daher VOR der MetricsMiddleware
@@ -266,6 +336,10 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             else:
                 counter_endpoint = endpoint
             await push_log(redis, entry)
+            # Fehler-Requests (4xx/5xx) zusätzlich in den eigenen Fehler-
+            # Ringpuffer: dasselbe entry-Dict, nur ein anderer Key.
+            if response.status_code >= 400:
+                await push_error_log(redis, entry)
             await incr_request(
                 redis,
                 endpoint=counter_endpoint,
@@ -280,7 +354,16 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             ):
                 now = datetime.now(UTC)
                 if mcp_resource:
-                    ident = "mcp"
+                    # Owner-Wunsch 2026-07-16: MCP-Traffic je ECHTER Client-IP
+                    # ausweisen (Header X-Infranode-Mcp-Client vom MCP-Server,
+                    # s. mcp/clientip.py), damit der Traffic-Tab zeigt, WER den
+                    # MCP-Server nutzt. Ohne Header (alter Container, stdio)
+                    # bleibt die Kanal-Kennung "mcp". Kardinalitaet bleibt wie
+                    # bei direkten IPs durch echte Nutzer begrenzt.
+                    mcp_client = (
+                        request.headers.get("x-infranode-mcp-client") or ""
+                    ).strip()
+                    ident = f"mcp:{mcp_client}" if mcp_client else "mcp"
                 elif via_gpt:
                     # Aggregiert wie "mcp" (bewusst NICHT die ephemere Nutzer-ID:
                     # begrenzte Kardinalität der Stunden-Buckets); die pseudonyme
@@ -306,7 +389,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 else:
                     channel = "api"
                 await incr_daily(redis, channel=channel, now=now)
-        except Exception as exc:  # noqa: BLE001 - Metrik-Verlust crasht nie den Request
+        except Exception as exc:
             # Graceful Degradation: ein Metrik-/Redis-Fehler darf den Request-Pfad
             # nie crashen; nur als Debug protokollieren (vermeidet S110 bare pass).
             log.debug("metrics_middleware_failed", error=str(exc))
@@ -316,14 +399,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         # crasht den Request nie. Nach call_next eingehängt (Pfad dann bekannt).
         try:
             pass  # Erstkontakt-Telemetrie ist privat (entfernt im Public-Build)
-        except Exception as exc:  # noqa: BLE001 - Erstkontakt-Push crasht nie den Request
+        except Exception as exc:
             log.debug("first_seen_middleware_failed", error=str(exc))
 
         # MCP-Aktion per ntfy verfolgen (feuert nur bei gesetztem MCP-Header).
         # Eigene Kapselung, best-effort, crasht den Request nie.
         try:
             pass  # MCP-Telemetrie ist privat (entfernt im Public-Build)
-        except Exception as exc:  # noqa: BLE001 - MCP-Push crasht nie den Request
+        except Exception as exc:
             log.debug("mcp_action_middleware_failed", error=str(exc))
 
         # GPT-Action per ntfy verfolgen (feuert nur bei erkanntem ChatGPT-
@@ -331,10 +414,11 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         try:
             await note_gpt_action(
                 request,
+                redis=request.app.state.redis,
                 settings=request.app.state.settings,
                 status_code=response.status_code,
             )
-        except Exception as exc:  # noqa: BLE001 - GPT-Push crasht nie den Request
+        except Exception as exc:
             log.debug("gpt_action_middleware_failed", error=str(exc))
 
         return response

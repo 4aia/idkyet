@@ -75,7 +75,7 @@ def _sign(payload: str, key: str) -> str:
     digest = hmac.new(
         key.encode("utf-8"),
         payload.encode("utf-8"),
-        hashlib.sha1,  # noqa: S324
+        hashlib.sha1,
     ).digest()
     return base64.b64encode(digest).decode("ascii")
 

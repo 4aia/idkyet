@@ -9,7 +9,7 @@ live verifiziert 2026-07-03: 4921 Sites / 7401 Stationen / 14937 Ladepunkte).
 Zwei Rollen:
 - ``build_geo_map(doc)``: reine Transformation des geparsten stat-Dokuments in
   die Map ``{slug: {refill_point_id: [lat, lon]}}`` (naechste Registry-Stadt im
-  bevölkerungsskalierten Umkreis, Formel-Muster BORIS/denkmal). Rein und ohne
+  bevölkerungsskalierten Umkreis, Formel-Muster BORIS/heritage). Rein und ohne
   IO, damit der private Ingest (``ingest.eround_geo``) und der Seed-Generator
   exakt dieselbe Zuordnung rechnen.
 - ``load_city_points(path)``: gecachter Datei-Loader für den Request-Pfad.
@@ -43,7 +43,7 @@ _CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _city_radius_deg(population: int | None) -> float:
-    """Stadt-Umkreis (Grad) aus der Einwohnerzahl (Formel-Muster BORIS/denkmal).
+    """Stadt-Umkreis (Grad) aus der Einwohnerzahl (Formel-Muster BORIS/heritage).
 
     Größere Städte = größeres Stadtgebiet -> größerer Umkreis, geklammert auf
     [0.06, 0.30] Grad. Bewusst grob (Stadtkern-Umkreis, kein amtlicher
@@ -68,7 +68,7 @@ def nearest_city_slug(lat: float, lon: float, cities) -> str | None:
 
     ``cities`` ist eine Sequenz ``(slug, lat, lon, radius_deg)``. Die
     Längen-Differenz wird mit ``cos(lat)`` gestaucht, damit die Distanz am Boden
-    näherungsweise isotrop ist (Muster ``denkmal._bbox_param``). Kein Treffer ->
+    näherungsweise isotrop ist (Muster ``heritage._bbox_param``). Kein Treffer ->
     ``None`` (Punkt liegt außerhalb aller Register-Städte, z.B. ländlich).
     """
     best: str | None = None

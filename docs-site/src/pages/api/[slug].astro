@@ -9,6 +9,7 @@ import Docs from "../../layouts/Docs.astro";
 import CodeTabs from "../../components/CodeTabs.astro";
 import TryIt from "../../components/TryIt.astro";
 import JsonLd from "../../components/JsonLd.astro";
+import DeprecationBanner from "../../components/DeprecationBanner.astro";
 import { curlFor, jsFor, pyFor } from "../../lib/codegen";
 
 export async function getStaticPaths() {
@@ -24,7 +25,21 @@ interface OpenApiParameter {
   in?: string;
   required?: boolean;
   description?: string;
-  schema?: { type?: string; enum?: unknown[] };
+  example?: unknown;
+  schema?: { type?: string; enum?: unknown[]; default?: unknown; example?: unknown };
+}
+
+// Anzeigbarer Beispielwert eines Parameters. Reihenfolge wie in lib/codegen
+// exampleFor: expliziter example -> schema.example -> schema.default. Ohne
+// Treffer bleibt die Zelle leer (kein erfundener Platzhalter in der Tabelle).
+function exampleOf(p: OpenApiParameter): string {
+  const candidates = [p.example, p.schema?.example, p.schema?.default];
+  for (const value of candidates) {
+    if (typeof value === "string" || typeof value === "number") {
+      return String(value);
+    }
+  }
+  return "";
 }
 
 const { endpoint } = Astro.props;
@@ -94,6 +109,7 @@ const pageUrl = `${site}/api/${endpoint.id}/`;
     <span class={`method ${methodClass}`}>{endpoint.method}</span>
     <span class="path">{endpoint.path}</span>
   </h1>
+  <DeprecationBanner operationId={endpoint.id} lang="de" />
   {endpoint.summary && <p><strong>{endpoint.summary}</strong></p>}
   {endpoint.description && <p>{endpoint.description}</p>}
 
@@ -107,6 +123,7 @@ const pageUrl = `${site}/api/${endpoint.id}/`;
             <th>In</th>
             <th>Pflicht</th>
             <th>Typ</th>
+            <th>Beispiel</th>
             <th>Beschreibung</th>
           </tr>
         </thead>
@@ -117,6 +134,7 @@ const pageUrl = `${site}/api/${endpoint.id}/`;
               <td>{p.in}</td>
               <td>{p.required ? "ja" : "nein"}</td>
               <td>{p.schema?.type ?? ""}</td>
+              <td>{exampleOf(p) ? <code>{exampleOf(p)}</code> : ""}</td>
               <td>{p.description ?? ""}</td>
             </tr>
           ))}

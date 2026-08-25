@@ -139,7 +139,7 @@ def build_limiter(settings: Settings) -> Limiter:
 
     def _check_with_allowlist(
         request: Request, endpoint_func, in_middleware: bool = False
-    ) -> None:  # noqa: ANN001 - slowapi-interne Signatur (Callable | None)
+    ) -> None:
         if not request.url.path.startswith("/admin") and ip_allowlisted(
             real_client_ip(request), parse_allowlist(Settings().ratelimit_allowlist)
         ):

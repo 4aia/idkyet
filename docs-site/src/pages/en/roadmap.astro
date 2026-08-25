@@ -1,0 +1,107 @@
+---
+// Roadmap (/en/roadmap): planned and upcoming changes plus the stability and
+// announcement policy. Aimed at production users who need to react in time.
+// Deliberately without hard date commitments and without internal or
+// licence-sensitive details.
+import Docs from "../../layouts/Docs.astro";
+---
+
+<Docs
+  title="Roadmap: planned data types and cities"
+  description="Planned and upcoming changes to the InfraNode API plus the stability and announcement policy: what happens additively and how breaking changes are announced in advance."
+  current="roadmap"
+  lang="en"
+  altLangPath="/roadmap/"
+>
+  <h1>Roadmap</h1>
+
+  <p>
+    This page collects what is planned next and how changes are announced. It is
+    aimed at everyone using InfraNode in production who wants to react in time.
+    Changes already shipped are in the <a href="/en/changelog/">changelog</a>.
+  </p>
+
+  <h2>Stability and announcements</h2>
+  <p>InfraNode is evolved additively from the ground up. In concrete terms:</p>
+  <ul>
+    <li>
+      <strong>The response envelope is stable.</strong> data and meta at the top
+      level, source_status, correlation_id and cache_status in meta, and the
+      attribution field per record all stay. New fields may be added; parse
+      defensively and ignore unknown fields.
+    </li>
+    <li>
+      <strong>New data types and cities are additive.</strong> They extend the
+      API without changing existing endpoints.
+    </li>
+    <li>
+      <strong>Changes affecting existing responses are announced in advance,</strong>
+      here on the roadmap and in the changelog, with a lead time of typically at
+      least 30 days. Deprecations are marked "Deprecated" in the changelog.
+    </li>
+    <li>
+      <strong>source_status is the reliable status source.</strong> Values like
+      ok, no_data, upstream_unavailable or not_covered are part of the contract:
+      always evaluate source_status rather than inferring an error from an empty
+      list.
+    </li>
+  </ul>
+  <p>
+    Availability and ongoing incidents are on the
+    <a href="https://status.infranode.dev" rel="noopener">status page</a>. New
+    changes also appear as an <a href="/en/changelog/feed.xml">RSS feed</a> and
+    in the
+    <a href="https://github.com/street1983nk/infranode/releases" rel="noopener"
+      >GitHub releases</a
+    >.
+  </p>
+
+  <h2>In progress</h2>
+  <ul>
+    <li>
+      <strong>Removal of the legacy field names.</strong> Since 25 July 2026 the
+      same concepts use the same name everywhere: post_code, street,
+      house_number, place, name, start, end, distance_km, power_kw, lat and lon.
+      The former names (plz, zip, strasse, hausnummer, ort, city, bezeichnung,
+      beginn, ende, art, dist_km, leistung_kw, einheit_typ), the stop_id of the
+      station boards (now trip_stop_id), the category in the station catalog
+      (now station_category) and the camelCase raw fields of the Autobahn
+      traffic messages still carry the same values. They will not be removed
+      <strong>before 24 August 2026</strong> (30 days after the announcement in
+      the <a href="/en/changelog/">changelog</a>); the exact date will be
+      announced there beforehand. Please switch to the new names before then.
+    </li>
+    <li>
+      <strong>More cities for existing data types.</strong> Further cities with
+      openly licensed sources are being connected step by step, among others for
+      roadworks/closures, parking and bike counters.
+    </li>
+    <li>
+      <strong>Finer pagination and limits.</strong> Pagination and limit
+      parameters are being unified for endpoints with large lists. Details are
+      under <a href="/en/pagination/">pagination &amp; limits</a>.
+    </li>
+    <li>
+      <strong>More federal states for the solar roof cadastre.</strong> Only
+      sources with an open licence that permits redistribution.
+    </li>
+  </ul>
+
+  <h2>Under consideration</h2>
+  <ul>
+    <li>Additional real-time data types per city where the source allows it.</li>
+    <li>Extended comparison and aggregate analysis across multiple cities.</li>
+  </ul>
+  <p>
+    This list is not a binding commitment on dates or scope. It shows the
+    direction. Requests and priorities are welcome.
+  </p>
+
+  <h2>Need something specific?</h2>
+  <p>
+    If you use InfraNode in production and need a specific city, data type or
+    commitment, write to
+    <a href="mailto:admin@infranode.dev">admin@infranode.dev</a>. Feedback from
+    production users influences the order of work.
+  </p>
+</Docs>

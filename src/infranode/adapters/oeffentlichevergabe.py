@@ -168,12 +168,17 @@ def _cpv_codes(tender: dict) -> str | None:
 
 
 def _award_status(release: dict) -> str | None:
-    """Leitet den Status aus ``awards[].status`` ab (DE-Export hat kein tender.status).
+    """Liefert den ROHEN Zuschlag-Status aus ``awards[].status`` (award_status).
 
     Echte OCDS-Struktur (DE-ZIP verifiziert): ``tender.status`` ist im DE-Export
-    durchgängig leer (0 Treffer); der fachliche Status steckt in
-    ``awards[].status`` (z.B. "active", "unsuccessful"). Liefert den ersten
-    gesetzten Award-Status (defensiv), sonst None.
+    durchgängig leer (0 Treffer). ``awards[].status`` beschreibt NICHT den
+    Verfahrensstand, sondern den Zuschlag: "active" = Zuschlag erteilt / Vertrag
+    aktiv, "pending" = Zuschlag schwebt, "unsuccessful" = Vergabe aufgehoben /
+    eingestellt. Deshalb taugt dieser Wert NICHT als ausgelieferter Verfahrens-
+    status (er würde bereits vergebene Aufträge als "laufend" ausweisen). Er wird
+    stattdessen als eigenes Feld ``award_status`` mitgeführt; den fachlichen
+    Verfahrens-status leitet ``_semantic_status`` aus dem notice_type ab. Liefert
+    den ersten gesetzten Award-Status (defensiv), sonst None.
     """
     awards = release.get("awards")
     if not isinstance(awards, list):
@@ -186,6 +191,23 @@ def _award_status(release: dict) -> str | None:
     return None
 
 
+def _semantic_status(notice_type: str | None) -> str | None:
+    """Leitet den fachlichen Verfahrens-status aus dem OCDS-notice_type (tag) ab.
+
+    Der DE-OCDS-Export trägt NIE ein ``tender.status``; der belastbare Signalgeber
+    für den Verfahrensstand ist der ``release.tag`` (notice_type): "tender" ist
+    eine laufende Auftragsbekanntmachung -> "active", "award" ist ein entschiedenes
+    Verfahren (Zuschlag oder Aufhebung) -> "complete". Alles andere (planning,
+    contractTermination, leer, None) hat keinen definierten Verfahrens-status und
+    ergibt None. Rein und ohne I/O.
+    """
+    if notice_type == "tender":
+        return "active"
+    if notice_type == "award":
+        return "complete"
+    return None
+
+
 def _tender_value(tender: dict) -> tuple[float | None, str | None]:
     """Leitet (value, currency) aus ``tender.value`` ab, sonst aus ``lots[].value``.
 
@@ -193,14 +215,20 @@ def _tender_value(tender: dict) -> tuple[float | None, str | None]:
     (26 von 545); der Auftragswert steckt dann je Los in ``tender.lots[].value``
     (amount/currency). Strategie: zuerst ``tender.value``; fehlt es, werden die
     ``lots[].value.amount`` aufsummiert (gleiche Währung) und als Gesamtwert
-    zurückgegeben. Kein Wert -> (None, None).
+    zurückgegeben. Betraege <= 0 gelten als nicht angegeben (Platzhalter der
+    Vergabestellen, Fix 2026-07-13): tender.value <= 0 faellt auf die lots
+    zurueck, lots <= 0 zaehlen nicht mit. Kein Wert -> (None, None).
     """
 
     def _read_value(value_obj: object) -> tuple[float | None, str | None]:
         if not isinstance(value_obj, dict):
             return None, None
         raw_amount = value_obj.get("amount")
-        amount = float(raw_amount) if isinstance(raw_amount, (int, float)) else None
+        amount = (
+            float(raw_amount)
+            if isinstance(raw_amount, (int, float)) and raw_amount > 0
+            else None
+        )
         return amount, _text(value_obj.get("currency"))
 
     value, currency = _read_value(tender.get("value"))
@@ -224,6 +252,107 @@ def _tender_value(tender: dict) -> tuple[float | None, str | None]:
     return total, lot_currency
 
 
+def _supplier_names(release: dict) -> list[str]:
+    """Liest die Auftragnehmer-Namen (Suppliers) aus dem Release (defensiv).
+
+    Echte OCDS-Struktur (DE-ZIP verifiziert, 2026-07-09, 1127 Releases): die
+    Auftragnehmer stehen als eigene Parteien in ``parties[]`` mit der Rolle
+    ``supplier`` (Name + Adresse; 215 von 379 Award-Releases). Das OCDS-
+    Standardfeld ``awards[].suppliers[]`` ist im DE-Export seltener befuellt
+    (30 von 379) und dient als Fallback, wenn keine supplier-Partei existiert.
+    Namen werden dedupliziert und in stabiler Reihenfolge des ersten Auftretens
+    geliefert; kein Treffer -> leere Liste (Quelle legt nicht offen).
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def _collect(name: object) -> None:
+        text = _text(name)
+        if text and text not in seen:
+            seen.add(text)
+            names.append(text)
+
+    parties = release.get("parties")
+    if isinstance(parties, list):
+        for party in parties:
+            if not isinstance(party, dict):
+                continue
+            roles = party.get("roles") or []
+            if isinstance(roles, list) and "supplier" in roles:
+                _collect(party.get("name"))
+    if names:
+        return names
+
+    awards = release.get("awards")
+    if isinstance(awards, list):
+        for award in awards:
+            if not isinstance(award, dict):
+                continue
+            suppliers = award.get("suppliers")
+            if not isinstance(suppliers, list):
+                continue
+            for supplier in suppliers:
+                if isinstance(supplier, dict):
+                    _collect(supplier.get("name"))
+    return names
+
+
+def _sum_values(
+    entries: list, key: str | None = None
+) -> tuple[float | None, str | None]:
+    """Aggregiert value-Objekte (amount/currency) ueber eine Liste (defensiv).
+
+    ``entries`` sind dicts, die das value-Objekt direkt (key=None) oder unter
+    ``key`` tragen. Aufsummiert werden nur Betraege der ZUERST gesehenen
+    Waehrung (abweichende Waehrungen werden uebersprungen statt falsch addiert);
+    ein Eintrag ohne Waehrung zaehlt zur ersten gesehenen. Betraege <= 0 sind
+    keine Angabe (Vergabestellen tragen 0 als Platzhalter ein, ein Zuschlag
+    ueber 0 EUR existiert nicht) und werden komplett uebersprungen (auch ihre
+    Waehrung zaehlt nicht). Kein Betrag -> (None, None).
+    """
+    total: float | None = None
+    currency: str | None = None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        value_obj = entry.get(key) if key else entry
+        if not isinstance(value_obj, dict):
+            continue
+        raw_amount = value_obj.get("amount")
+        if not isinstance(raw_amount, (int, float)) or raw_amount <= 0:
+            continue
+        cur = _text(value_obj.get("currency"))
+        if currency is None:
+            currency = cur
+        elif cur is not None and cur != currency:
+            # Waehrungsmix: abweichende Waehrung NICHT blind addieren.
+            continue
+        total = float(raw_amount) if total is None else total + float(raw_amount)
+    return total, currency
+
+
+def _award_value(release: dict) -> tuple[float | None, str | None]:
+    """Leitet den Zuschlagswert aus ``awards[].value``, sonst ``contracts[].value`` ab.
+
+    Echte OCDS-Struktur (DE-ZIP verifiziert, 2026-07-09): der tatsaechlich
+    vergebene Auftragswert steht bei Award-Releases meist NICHT in
+    ``tender.value``/``lots[].value`` (Schaetzwert der Ausschreibung), sondern
+    in ``contracts[].value`` (215 von 379 Award-Releases) bzw. seltener direkt
+    in ``awards[].value`` (46 von 379). Strategie analog ``_tender_value``:
+    zuerst ``awards[].value`` (aufsummiert, gleiche Waehrung), sonst
+    ``contracts[].value``. Kein Wert -> (None, None).
+    """
+    awards = release.get("awards")
+    if isinstance(awards, list):
+        total, currency = _sum_values(awards, key="value")
+        if total is not None:
+            return total, currency
+    contracts = release.get("contracts")
+    if isinstance(contracts, list):
+        return _sum_values(contracts, key="value")
+    return None, None
+
+
 def _award_date(release: dict) -> str | None:
     """Liefert das Datum des ersten Awards (oder None), defensiv."""
     awards = release.get("awards")
@@ -241,17 +370,25 @@ def _parse_release(release: dict) -> dict | None:
     """Bildet ein einzelnes OCDS-Release defensiv auf ein schlankes Notice-dict ab.
 
     Liest notice_id (``tender.id``, sonst ``ocid``), notice_version (das OCDS-
-    Release-``date`` als zeitliche Recency je Notice, T-21-DEDUP/H13), status/
-    notice_type, buyer-Adresse (locality/postalCode/region/countryName) +
-    buyer_name, tender (title/cpv/value/currency), Erfüllungsort,
-    publication_date, deadline, award_date. Jedes Feld mit None-Fallback (kein
-    ungefangener KeyError, T-21-PARSE). Ohne fachliche notice_id (weder
+    Release-``date`` als zeitliche Recency je Notice, T-21-DEDUP/H13),
+    release_id (``release.id``, die Bekanntmachungs-UUID fuer die Portal-
+    Detailseite, None-tolerant), notice_type (``release.tag``),
+    status (semantisch aus notice_type:
+    tender -> active, award -> complete, sonst None), award_status (roher
+    ``awards[].status``: active/pending/unsuccessful/None), buyer-Adresse
+    (locality/postalCode/region/countryName) + buyer_name, tender
+    (title/cpv/value/currency), Erfüllungsort, publication_date, deadline,
+    award_date, Auftragnehmer (``suppliers`` aus parties[role=supplier] bzw.
+    awards[].suppliers) und Zuschlagswert (``award_value``/``award_currency``
+    aus awards[].value bzw. contracts[].value). Jedes Feld mit None-Fallback
+    (kein ungefangener KeyError, T-21-PARSE). Ohne fachliche notice_id (weder
     ``tender.id`` noch ``ocid``) -> None (unbrauchbar).
     """
     if not isinstance(release, dict):
         return None
 
-    tender = release.get("tender") if isinstance(release.get("tender"), dict) else {}
+    tender_raw = release.get("tender")
+    tender = tender_raw if isinstance(tender_raw, dict) else {}
 
     # notice_id: der fachliche, je Notice stabile Schlüssel ist die ``tender.id``
     # (eine UUID, im DE-Export identisch mit dem ocid-Suffix); die ``ocid`` (mit
@@ -271,6 +408,15 @@ def _parse_release(release: dict) -> dict | None:
     # release.id zurück (eindeutig, vergleichbar).
     notice_version = _text(release.get("date")) or _text(release.get("id")) or notice_id
 
+    # release_id (Fix 2026-07-08): die BEKANNTMACHUNGS-UUID (OCDS release.id).
+    # Das Portal oeffentlichevergabe.de erwartet in der Detailseiten-URL
+    # (?noticeId=...) genau DIESE UUID; die tender.id (Verfahrens-UUID) rendert
+    # dort "Es konnten keine Details zu der ID geladen werden" (live verifiziert).
+    # notice_id/Dedup bleiben UNVERAENDERT auf tender.id (fachlicher Schluessel);
+    # release_id dient ausschliesslich dem source_url-Bau im Mapper. Defensiv
+    # None-tolerant (fehlende release.id -> source_url None statt kaputter Link).
+    release_id = _text(release.get("id"))
+
     tags = release.get("tag")
     notice_type = None
     if isinstance(tags, list) and tags:
@@ -278,8 +424,14 @@ def _parse_release(release: dict) -> dict | None:
     elif isinstance(tags, str):
         notice_type = _text(tags)
 
-    # status (H/Status): tender.status fehlt im DE-Export -> aus awards[].status.
-    status = _text(tender.get("status")) or _award_status(release)
+    # status (H/Status): tender.status fehlt im DE-Export durchgängig. Der
+    # Verfahrens-status wird deshalb semantisch aus dem notice_type (release.tag)
+    # abgeleitet: tender -> active (laufend), award -> complete (entschieden),
+    # sonst None. Der ROHE Zuschlag-Status (awards[].status) wird zusätzlich als
+    # award_status mitgeführt, taugt aber NICHT als Verfahrens-status (er würde
+    # bereits vergebene Aufträge fälschlich als "laufend" ausweisen).
+    status = _semantic_status(notice_type)
+    award_status = _award_status(release)
     title = _text(tender.get("title"))
 
     # cpv (K10): aus items[].classification (scheme==CPV), NICHT tender.classification.
@@ -287,6 +439,15 @@ def _parse_release(release: dict) -> dict | None:
 
     # value (Status/Value): tender.value ist meist leer -> aus lots[].value aggregiert.
     value, currency = _tender_value(tender)
+
+    # Zuschlagswert (Fix 2026-07-13): der VERGEBENE Wert steht bei Awards in
+    # awards[].value bzw. contracts[].value, nie zuverlaessig im tender-Block.
+    # Er wird als eigenes Feld gefuehrt (value bleibt der Ausschreibungswert).
+    award_value, award_currency = _award_value(release)
+
+    # Auftragnehmer (Fix 2026-07-13): parties[role=supplier], Fallback
+    # awards[].suppliers[]. Leer, wenn die Quelle nicht offenlegt.
+    suppliers = _supplier_names(release)
 
     deadline = None
     tender_period = tender.get("tenderPeriod")
@@ -299,8 +460,10 @@ def _parse_release(release: dict) -> dict | None:
     return {
         "notice_id": notice_id,
         "notice_version": notice_version,
+        "release_id": release_id,
         "notice_type": notice_type,
         "status": status,
+        "award_status": award_status,
         "title": title,
         "buyer_name": _buyer_name(release),
         "buyer_locality": _text(buyer_address.get("locality")),
@@ -313,6 +476,9 @@ def _parse_release(release: dict) -> dict | None:
         "publication_date": _text(release.get("date")),
         "deadline": deadline,
         "award_date": _award_date(release),
+        "suppliers": suppliers,
+        "award_value": award_value,
+        "award_currency": award_currency,
         "buyer_address": buyer_address or None,
         "delivery_addresses": delivery,
     }

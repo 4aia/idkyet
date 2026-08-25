@@ -3,7 +3,7 @@
 Städtische Baumkataster sind KOMMUNALES Open Data: jede Stadt führt ihr eigenes
 Kataster, meist als WFS. Es gibt keinen bundesweiten Endpunkt. Der Adapter ist
 daher per STADT konfiguriert: ``BAUM_WFS`` mappt einen Stadt-Slug auf eine WFS-
-Konfiguration (analog zur föderierten ``DENKMAL_WFS``, dort je Bundesland).
+Konfiguration (analog zur föderierten ``HERITAGE_WFS``, dort je Bundesland).
 
 Stand: Berlin (verifiziert, GeoJSON-WFS, DL-DE/Zero 2.0; ~900k Straßenbäume).
 Weitere Städte (Hamburg/Koeln/Frankfurt) folgen nach WFS-Verifikation.
@@ -26,11 +26,25 @@ import httpx
 
 # Obergrenze der je Anfrage geladenen Baum-Features (Größen-/DoS-Schutz). Kataster
 # sind sehr groß -> bewusste Stichprobe, in der Doku als gedeckelt gekennzeichnet.
-_COUNT_CAP = 500
+# Der Cap ist so gewählt, dass der Worst-Case unter dem GPT-Actions-Antwortlimit
+# (~100 KB) bleibt: 225 x 395 B (größtes Live-Item Berlin 394 B plus Komma; seit
+# der Abkündigung 2026-08-01 trägt jedes Item die kanonischen englischen Keys
+# ZUSÄTZLICH zu den rohen Quell-Keys) plus ~2 KB Envelope = ~91 KB, sicher unter
+# 95 KB. Nach dem Entfernen der abgekündigten Duplikate (31.08.2026) kann der Cap
+# wieder auf 350 steigen. Regressionstest:
+# tests/integration/test_city_tree_cadastre.py (test_worst_case_response_under_
+# actions_limit). Die Truncation bleibt ehrlich (count/total_available/truncated).
+_COUNT_CAP = 225
 
 
 class BaumSource(NamedTuple):
-    """WFS-Konfiguration eines städtischen Baumkatasters."""
+    """WFS-Konfiguration eines städtischen Baumkatasters.
+
+    ``license_url`` ist je Stadt verschieden (Berlin DL-DE/Zero, Hamburg DL-DE/BY,
+    Kiel CC-BY) und wandert in die Attribution. ``output_format`` ist der WFS-
+    ``outputFormat``-Wert (Hamburg spricht ``application/geo+json``, der Kiel-
+    ArcGIS-WFS ``GEOJSON``).
+    """
 
     url: str
     typename: str
@@ -38,12 +52,19 @@ class BaumSource(NamedTuple):
     license_id: str
     license_tier: str
     attribution: str
+    license_url: str
+    output_format: str = "application/json"
+
+
+_DL_DE_ZERO_URL = "https://www.govdata.de/dl-de/zero-2-0"
+_DL_DE_BY_URL = "https://www.govdata.de/dl-de/by-2-0"
+_CC_BY_4_0_URL = "https://creativecommons.org/licenses/by/4.0/"
 
 
 # Stadt-Slug -> WFS-Konfiguration. Nur verifizierte, offen lizenzierte Städte
-# (fail-closed). Berlin: GetCapabilities + Lizenz (DL-DE/Zero 2.0) verifiziert
-# 2026-06-26 (Fees-Feld der Capabilities).
+# (fail-closed). Alle Endpunkte HTTP-verifiziert (GetFeature + Lizenz) 2026-07-17.
 BAUM_WFS: dict[str, BaumSource] = {
+    # Berlin: GetCapabilities + Lizenz (DL-DE/Zero 2.0) verifiziert 2026-06-26.
     "berlin": BaumSource(
         url="https://gdi.berlin.de/services/wfs/baumbestand",
         typename="baumbestand:strassenbaeume",
@@ -59,6 +80,50 @@ BAUM_WFS: dict[str, BaumSource] = {
         license_id="dl_de_zero_2_0",
         license_tier="A",
         attribution="Geoportal Berlin / Straßen- und Anlagenbaumbestand",
+        license_url=_DL_DE_ZERO_URL,
+    ),
+    # Hamburg: Straßenbaumkataster (LGV), MultiPoint-GeoJSON, DL-DE/BY-2.0.
+    # Nur ``application/geo+json`` (wie der Hamburg-Denkmal-WFS).
+    "hamburg": BaumSource(
+        url="https://geodienste.hamburg.de/HH_WFS_Strassenbaumkataster",
+        typename="app:strassenbaumkataster",
+        fields=(
+            "gattung_deutsch",
+            "art_deutsch",
+            "pflanzjahr",
+            "kronendurchmesser",
+            "strasse",
+            "stadtteil",
+            "bezirk",
+        ),
+        license_id="dl_de_by_2_0",
+        license_tier="A",
+        attribution=(
+            "Freie und Hansestadt Hamburg, Landesbetrieb Geoinformation "
+            "und Vermessung (LGV)"
+        ),
+        license_url=_DL_DE_BY_URL,
+        output_format="application/geo+json",
+    ),
+    # Kiel: Baeume auf staedtischem Grund (ArcGIS-WFS der LH Kiel), CC-BY-4.0
+    # (AccessConstraints der Capabilities). typeName ``lhkiel:Baeume``, outputFormat
+    # ``GEOJSON``. Feldnamen mit Sonderzeichen aus dem WFS uebernommen.
+    "kiel": BaumSource(
+        url=(
+            "https://ims.kiel.de/geodatenextern/services/Stadtplan/"
+            "LHKielWmsWfs/MapServer/WFSServer"
+        ),
+        typename="lhkiel:Baeume",
+        fields=(
+            "Baumart",
+            "Baumart__bot._",
+            "Kronendurchmesser__m_",
+        ),
+        license_id="cc_by_4_0",
+        license_tier="A",
+        attribution="Landeshauptstadt Kiel",
+        license_url=_CC_BY_4_0_URL,
+        output_format="GEOJSON",
     ),
 }
 
@@ -83,7 +148,7 @@ async def fetch_trees(
         "request": "GetFeature",
         "typeNames": src.typename,
         "count": str(_COUNT_CAP),
-        "outputFormat": "application/json",
+        "outputFormat": src.output_format,
         "srsName": "EPSG:4326",
     }
     resp = await http.get(src.url, params=params)
@@ -95,6 +160,7 @@ async def fetch_trees(
         "license_id": src.license_id,
         "license_tier": src.license_tier,
         "attribution": src.attribution,
+        "license_url": src.license_url,
         "features": data.get("features", []),
         # Echter Gesamtbestand laut WFS (numberMatched, Audit 220); "unknown" -> None.
         "total_available": _coerce_count(data.get("numberMatched")),

@@ -73,7 +73,7 @@ def _make_storage():
             "(pro-Prozess, nicht replica-geteilt).",
             url,
         )
-    except Exception as exc:  # noqa: BLE001 - jeder Storage-Init-Fehler -> Fallback
+    except Exception as exc:
         logger.warning(
             "MCP rate-limit: Redis-Storage-Init fehlgeschlagen (%s), "
             "In-Memory-Fallback: %s",

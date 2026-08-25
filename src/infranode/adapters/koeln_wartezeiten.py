@@ -1,4 +1,4 @@
-"""Keyloser Koeln-Behoerden-Wartezeiten-Adapter ``fetch_koeln_wartezeiten``.
+"""Keyloser Koeln-Behoerden-Wartezeiten-Adapter ``fetch_koeln_wait_times``.
 
 Direkter Zugang zu den Live-Wartezeiten der Koelner Kundenzentren + Kfz-
 Zulassungsstelle ueber den offenen JSON-Feed der Stadt Koeln (KEIN Key, KEINE
@@ -11,7 +11,7 @@ Mobilithek, [VERIFIED 2026-07-05], HTTPS 200 application/json):
   "2"=geschlossen), ``sondertext`` (Klartext) und ``wartezeit_minuten``
   (Wartezeit in Minuten als String). 9 Kundenzentren + Kfz-Zulassungsstelle.
 
-Rueckgabe ist das raw-dict, das ``map_koeln_wartezeiten`` erwartet: ``slug`` =
+Rueckgabe ist das raw-dict, das ``map_koeln_wait_times`` erwartet: ``slug`` =
 "koeln" und ``items`` (die rohe, ungefilterte Items-Liste). Der Adapter macht
 KEIN Mapping/CanonicalRecord und kennt KEIN Cache/Breaker (das liefert die
 Resilienz-Fassade). ``resp.raise_for_status()`` ist Pflicht, damit ein 5xx als
@@ -19,7 +19,7 @@ Resilienz-Fassade). ``resp.raise_for_status()`` ist Pflicht, damit ein 5xx als
 
 Lizenz: Datenlizenz Deutschland Zero 2.0 (govdata.de/dl-de/zero-2-0) = Tier A
 (offenedaten-koeln.de, Dataset kundenzentren-koeln-wartezeiten). Siehe
-``mappers/koeln_wartezeiten.map_koeln_wartezeiten``.
+``mappers/koeln_wait_times.map_koeln_wait_times``.
 
 Sicherheit:
 - T-Q-01 (SSRF): Der Host ist in ``_URL`` hartkodiert; es fliesst kein
@@ -42,10 +42,10 @@ _URL = "https://www.stadt-koeln.de/externe-dienste/open-data/waiting-od.php"
 _MAX_BYTES = 1_048_576
 
 
-async def fetch_koeln_wartezeiten(http: httpx.AsyncClient) -> dict:
+async def fetch_koeln_wait_times(http: httpx.AsyncClient) -> dict:
     """Holt die Live-Wartezeiten Koeln und liefert das raw-dict fuer den Mapper.
 
-    Rueckgabe-Keys (exakt das, was ``map_koeln_wartezeiten`` erwartet): ``slug``
+    Rueckgabe-Keys (exakt das, was ``map_koeln_wait_times`` erwartet): ``slug``
     ("koeln") und ``items`` (die rohe Items-Liste, oder ``[]`` wenn der Body kein
     ``items``-Array traegt). ``raise_for_status`` ist Pflicht (5xx -> Fassade
     STALE-ON-ERROR). Zero-Trust: ein kaputter/fehlender Body fuehrt zu leeren

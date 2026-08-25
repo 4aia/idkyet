@@ -10,7 +10,7 @@
   --color-primary-strong: #163c47; /* Petrol dunkler, Hover */
   --color-primary-soft: #e7f0f2; /* Petrol sehr hell, aktive Flaechen */
   --color-accent: #5f9e2f; /* Gruen, Badges/CTAs (AA auf Weiss) */
-  --color-accent-strong: #4e8526; /* Gruen dunkler, Hover */
+  --color-accent-strong: #457c1e; /* Gruen dunkler, Hover + Text-tragende Fuellungen (>=4.5:1 mit --on-accent) */
   --color-accent-soft: #eef6e4; /* Gruen sehr hell */
 
   --bg: #ffffff;
@@ -26,6 +26,17 @@
   --code-border: #1d4e5c;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 8px 28px rgba(13, 42, 51, 0.1);
+  /* Text auf gefuellten Marken-Buttons/Badges (Petrol/Gruen). Im Dark Mode
+     werden die Fuellungen hell, dann kippt dieser Wert auf dunkel. */
+  --on-accent: #ffffff;
+  /* Warn-/Deprecated-Badges (Abdeckung, Changelog): ein Satz Toene statt
+     verstreuter Hexwerte. */
+  --warn-fg: #9a5b00;
+  --warn-bg: #fbf3e2;
+  --warn-border: #ecd9b0;
+  /* Topbar-Transparenz (blur dahinter), themable. */
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+  color-scheme: light;
   --radius: 8px;
   --maxw: 1320px;
   --nav-w: 260px;
@@ -33,6 +44,38 @@
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark Mode: reine Token-Schicht, folgt der Systempraeferenz (kein Toggle).
+   Gleiche Ruhe wie hell: getoente Petrol-Neutrale statt Schwarz, Markenfarben
+   aufgehellt fuer AA-Kontrast auf dunklem Grund. Codebloecke bleiben die
+   dunkelste Flaeche. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-primary: #7ab8cb; /* Petrol hell, Links/aktive Nav (AA auf --bg) */
+    --color-primary-strong: #9ccddb;
+    --color-primary-soft: #16333d;
+    --color-accent: #8fc04f; /* Gruen hell (AA auf --bg) */
+    --color-accent-strong: #a5d16a;
+    --color-accent-soft: #223317;
+    --bg: #0f1d23;
+    --bg-soft: #15272e;
+    --fg: #e4edf0;
+    --fg-muted: #9db0b7;
+    --border: #1f333b;
+    --border-strong: #2c4550;
+    --code-bg: #0b2229; /* bleibt die dunkelste Flaeche der Seite */
+    --code-fg: #e8f0f1;
+    --code-border: #2c4550;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+    --on-accent: #0f1d23; /* dunkler Text auf den hellen Marken-Fuellungen */
+    --warn-fg: #e6b269;
+    --warn-bg: #2c2113;
+    --warn-border: #4d3a1c;
+    --topbar-bg: rgba(15, 29, 35, 0.85);
+  }
 }
 
 * {
@@ -66,6 +109,14 @@ code {
   font-size: 0.9em;
 }
 
+/* Konsistenter Tastatur-Fokus fuer alle interaktiven Elemente (WCAG 2.4.7).
+   Nur bei :focus-visible, damit Maus-Klicks keinen Ring hinterlassen. */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* Skip-Link (A11y): offscreen, wird bei Tastatur-Fokus sichtbar oben links.
    Footer wirbt mit "barrierefrei" -> Tastatur-Nutzer ueberspringen Topbar/Nav. */
 .skip-link {
@@ -75,7 +126,7 @@ code {
   z-index: 100;
   padding: 0.5rem 0.85rem;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   transition: top 0.15s ease;
@@ -95,7 +146,7 @@ code {
   align-items: center;
   gap: 1.5rem;
   padding: 0.7rem 1.5rem;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--topbar-bg);
   backdrop-filter: saturate(150%) blur(8px);
   border-bottom: 1px solid var(--border-strong);
 }
@@ -131,11 +182,95 @@ code {
   height: 64px;
   width: auto;
   display: block;
+  /* Das PNG hat weissen Grund: im Dark Mode wird daraus eine bewusste
+     Plakette statt eines harten weissen Kastens. */
+  border-radius: 10px;
 }
 @media (max-width: 640px) {
   .topbar__logo {
     height: 52px;
   }
+}
+
+/* Hamburger in der Topbar (nur Mobil, nur mit JS): öffnet den Nav-Drawer.
+   Das Icon wechselt über aria-expanded zwischen Linien und X. Ohne JS bleibt
+   der Button hidden und der Inline-"Menü"-Toggle übernimmt (Fallback). */
+.topbar__menu {
+  display: none;
+}
+.topbar__menu[hidden] {
+  display: none !important;
+}
+@media (max-width: 1080px) {
+  .js .topbar__menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    background: var(--color-accent);
+    color: var(--on-accent);
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(78, 133, 38, 0.35);
+    transition:
+      background 0.15s ease,
+      color 0.15s ease,
+      box-shadow 0.15s ease,
+      transform 0.15s ease;
+  }
+  .topbar__menu:hover {
+    background: var(--color-accent-strong);
+  }
+  .topbar__menu:active {
+    transform: scale(0.94);
+  }
+  .topbar__menu:focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+  }
+  /* Offen: weiche Grün-Fläche mit Akzent-Ring, Icon wird zum X und dreht
+     kurz ein. */
+  .topbar__menu[aria-expanded="true"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
+    box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  }
+  .topbar__menu svg {
+    transition: transform 0.2s ease;
+  }
+  .topbar__menu[aria-expanded="true"] svg {
+    transform: rotate(90deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .js .topbar__menu,
+    .topbar__menu svg {
+      transition: none;
+    }
+    .topbar__menu:active {
+      transform: none;
+    }
+    .topbar__menu[aria-expanded="true"] svg {
+      transform: none;
+    }
+  }
+}
+.topbar__menu .topbar__menu-close {
+  display: none;
+}
+.topbar__menu[aria-expanded="true"] .topbar__menu-open {
+  display: none;
+}
+.topbar__menu[aria-expanded="true"] .topbar__menu-close {
+  display: block;
+}
+
+/* Drawer offen: Seite dahinter nicht scrollen (Klasse setzt das JS, mobil). */
+body.nav-open {
+  overflow: hidden;
 }
 
 /* Dezenter MCP-Hinweis (auf allen Seiten ausser der MCP-Seite selbst) */
@@ -161,8 +296,9 @@ code {
   font-weight: 700;
   font-size: 0.68rem;
   letter-spacing: 0.04em;
-  color: #fff;
-  background: var(--color-accent);
+  color: var(--on-accent);
+  /* AA (4.5:1) fuer kleinen Text: die dunkle Gruen-Stufe, nicht die Marken-Stufe */
+  background: var(--color-accent-strong);
   border-radius: 4px;
   padding: 0.1rem 0.4rem;
 }
@@ -205,17 +341,61 @@ code {
   display: none;
 }
 
-.nav__group {
-  margin-bottom: 1.25rem;
+/* Nav-Gruppen (Loslegen, Grundlagen, API-Referenz, KI & Integrationen,
+   Projekt): aufklappbare details. Desktop: alle offen. Mobiler Drawer:
+   geschlossen bis auf die aktive Gruppe (JS, data-active). Typografie eine
+   Stufe kräftiger als die Kategorie-Titel, damit die Gruppen als oberste
+   Ebene lesbar sind. */
+.nav__grp {
+  margin-bottom: 1.1rem;
 }
 
-.nav__title {
-  font-size: 0.72rem;
+.nav__grp-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.74rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--fg-muted);
-  margin: 0 0 0.4rem;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  padding: 0.25rem 0;
+}
+
+.nav__grp-title::-webkit-details-marker {
+  display: none;
+}
+
+.nav__grp-title::after {
+  content: "";
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  opacity: 0.55;
+}
+
+.nav__grp-title:hover::after {
+  opacity: 1;
+}
+
+/* Label nimmt die Restbreite, Zähler und Chevron stehen rechts. */
+.nav__grp-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav__grp[open] > .nav__grp-title {
+  margin-bottom: 0.35rem;
+}
+
+.nav__grp[open] > .nav__grp-title::after {
+  transform: rotate(-135deg);
 }
 
 .nav__list {
@@ -250,48 +430,33 @@ code {
   font-weight: 600;
 }
 
-/* Aufklappbare Nav-Sektion (API-Referenz): auf der Startseite eingeklappt, damit
-   der Erstkontakt nicht von der vollen Endpunktliste erschlagen wird; sonst via
-   open-Attribut offen. Links bleiben im DOM (SEO unbeeintraechtigt). Unabhaengig
-   vom mobilen Menue-Toggle (das nur die aeussere .nav__disclosure steuert). */
-.nav__sect {
-  margin-bottom: 1.25rem;
-}
-.nav__sect-title {
+/* Referenz-Einträge: sprechendes Label einzeilig mit Ellipsis (volltext plus
+   operationId im title-Attribut); Live-Quellen tragen ein kompaktes Badge in
+   der Akzentfarbe. */
+.nav__link--ep {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.4rem;
-  cursor: pointer;
-  list-style: none;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--fg-muted);
-  padding: 0.1rem 0;
 }
-.nav__sect-title::-webkit-details-marker {
-  display: none;
+.nav__ep-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
 }
-.nav__sect-title::after {
-  content: "";
+.nav__live {
   flex: none;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 0.2s ease;
-}
-.nav__sect[open] .nav__sect-title {
-  margin-bottom: 0.6rem;
-}
-.nav__sect[open] .nav__sect-title::after {
-  transform: rotate(-135deg);
-}
-.nav__group--sub {
-  margin-bottom: 0.9rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 0 0.28rem;
 }
 
 /* Klappbare Nav-Kategorien (Themen + API-Tags): Titel klickbar, Rest oeffnet.
@@ -428,7 +593,7 @@ code {
   padding: 0.18rem 0.55rem;
   border-radius: 6px;
   letter-spacing: 0.04em;
-  color: #ffffff;
+  color: var(--on-accent);
   background: var(--color-primary);
   vertical-align: middle;
 }
@@ -601,7 +766,7 @@ code {
   border: none;
   border-radius: 8px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 
@@ -782,6 +947,40 @@ code {
     display: block;
     margin-top: 1rem;
   }
+  /* Mit JS wird der Inline-Toggle durch den Topbar-Hamburger ersetzt und die
+     Liste zum Overlay-Drawer unter der (sticky) Topbar. --topbar-h setzt das
+     JS aus der gemessenen Topbar-Höhe. */
+  .js .nav__toggle {
+    display: none;
+  }
+  .js .nav__disclosure[open] .nav__inner {
+    position: fixed;
+    top: var(--topbar-h, 4.2rem);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+    border-top: 1px solid var(--border-strong);
+    padding: 1rem 1.25rem 2.5rem;
+    margin-top: 0;
+  }
+  /* Touch-Ziele im Drawer: Gruppen-/Kategorie-Titel und Links auf mindestens
+     44px Hoehe (WCAG 2.5.8), Ausrichtung bleibt links wie gehabt. */
+  .nav__grp-title,
+  .nav__cat-title {
+    min-height: 2.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+  .nav__link {
+    display: flex;
+    align-items: center;
+    min-height: 2.75rem;
+    padding: 0.4rem 0.5rem;
+  }
 }
 
 /* Landing */
@@ -808,7 +1007,7 @@ code {
 
 .btn-primary {
   background: var(--color-primary);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .btn-primary:hover {
@@ -821,12 +1020,12 @@ code {
   font-weight: 600;
   padding: 0.6rem 1.2rem;
   border-radius: 10px;
-  background: var(--color-accent);
-  color: #ffffff;
+  background: var(--color-accent-strong);
+  color: var(--on-accent);
 }
 
 .btn-accent:hover {
-  background: var(--color-accent-strong);
+  background: var(--color-accent);
   text-decoration: none;
 }
 
@@ -910,52 +1109,54 @@ code {
 /* Zahlen-Kacheln: Datenblatt-Kennzahlen statt Button-artiger Chips (Polish
    2026-07-04, Stitch-inspiriert). Grosse Mono-Zahl oben, kleines Label
    darunter; flach, Hairline-Border, kein Schatten (Design-Sprache). */
+/* Kennzahlen-Strip: bewusst OHNE Kaestchen-Raster (Audit 2026-08-13,
+   Hero-Metric-Naehe). Offene Zahlenreihe mit Groessenhierarchie, die erste
+   Zahl traegt als Anker etwas mehr Gewicht. */
 .stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
-  gap: 1px;
-  margin: 1.6rem 0 0;
-  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem 2.6rem;
+  margin: 2rem 0 0;
+  padding: 1.1rem 0 0;
   list-style: none;
-  background: var(--border-strong);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  overflow: hidden;
+  border-top: 1px solid var(--border-strong);
 }
 
 .stat {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.85rem 1rem 0.8rem;
-  background: var(--bg);
+  gap: 0.15rem;
   font-size: 0.82rem;
   color: var(--fg-muted);
-  transition: background 0.18s ease;
-}
-
-.stat:hover {
-  background: var(--bg-soft);
 }
 
 .stat a {
   color: inherit;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.15rem;
 }
 
 .stat a:hover {
   text-decoration: none;
 }
 
+.stat a:hover strong {
+  color: var(--color-primary-strong);
+}
+
 .stat strong {
   font-family: var(--mono);
   font-size: 1.45rem;
-  line-height: 1.15;
+  line-height: 1.1;
   color: var(--color-primary);
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+.stat:first-child strong {
+  font-size: 1.9rem;
 }
 
 /* Hero-Terminal: ein einziger curl-Aufruf plus Envelope-Auszug direkt im
@@ -1097,7 +1298,15 @@ code {
   font-size: 0.85rem;
   white-space: nowrap;
 }
+/* Touch-Ziel >= 44px (WCAG 2.5.8 / Footer-Versprechen "barrierefrei"):
+   die Klickflaeche waechst ueber Padding, der Textlauf bleibt kompakt. */
 .langswitch__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.4rem;
   color: var(--fg-muted);
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1174,15 +1383,6 @@ code {
   table.cities td:nth-child(6) {
     display: none;
   }
-}
-
-/* Hinweis unter dem API-Reference-Nav-Eintrag (EN) */
-.nav__hint {
-  margin: 0.2rem 0 0;
-  padding: 0 0.2rem;
-  font-size: 0.74rem;
-  line-height: 1.4;
-  color: var(--fg-muted);
 }
 
 /* Footer */
@@ -1264,7 +1464,7 @@ code {
   padding: 0.5rem 1rem;
   border-radius: 8px;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
   text-decoration: none;
 }

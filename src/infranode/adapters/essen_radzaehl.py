@@ -1,4 +1,4 @@
-"""Essen-Radzählstellen-Adapter ``fetch_essen_radzaehl`` (DATA-40, Tier A).
+"""Essen-Radzählstellen-Adapter ``fetch_essen_bike_counts`` (DATA-40, Tier A).
 
 Liefert je Essener Radzählstelle den Jahres-Summenwert keylos aus der offenen
 Jahres-CSV ("kumuliert") des städtischen Open-Data-Portals (DL-DE/BY 2.0, Stadt
@@ -44,7 +44,7 @@ def _to_int(cell: str) -> int | None:
         return None
 
 
-async def fetch_essen_radzaehl(
+async def fetch_essen_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,

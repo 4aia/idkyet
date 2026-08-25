@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import httpx
 
+from infranode.normalization.fields import clean_text, post_code, split_house_number
+
 # Host hartkodiert (T-10-SSRF): nur dieser eine Köln-Open-Data-Events-Feed. Nie
 # roher User-/Upstream-Host; es gibt keine dynamische Ziel-URL.
 _BASE = "https://www.stadt-koeln.de/externe-dienste/open-data/events-od.php"
@@ -94,17 +96,33 @@ async def fetch_events(
         if not isinstance(it, dict):
             continue
         # Phase-7/8/9-Konvention: fehlendes Feld -> None (kein KeyError).
+        # Adresse einmal normalisiert (Konsistenz-Audit 2026-07-25): Leerstrings
+        # werden None, die PLZ immer fuenfstellig. Die kanonischen englischen
+        # Namen (street/house_number/post_code) stehen additiv neben den alten
+        # deutschen Feldern, die abgekuendigt sind.
+        street = clean_text(it.get("strasse"))
+        house_number = clean_text(it.get("hausnummer"))
+        if house_number is None:
+            street, house_number = split_house_number(street)
+        plz = post_code(it.get("plz"))
+        title = clean_text(it.get(_FIELD_TITLE))
         events.append(
             {
-                "title": it.get(_FIELD_TITLE),
+                "title": title,
+                # Kanonischer Bezeichnungsname wie in allen anderen Datenarten.
+                "name": title,
                 "date_from": it.get(_FIELD_DATE_FROM),
                 "date_to": it.get(_FIELD_DATE_TO),
                 "location": it.get(_FIELD_LOCATION),
                 "lat": _to_float(it.get(_FIELD_LAT)),
                 "lon": _to_float(it.get(_FIELD_LON)),
-                "strasse": it.get("strasse"),
-                "hausnummer": it.get("hausnummer"),
-                "plz": it.get("plz"),
+                "street": street,
+                "house_number": house_number,
+                "post_code": plz,
+                # Abgekuendigt (alte deutsche Namen), Werte identisch:
+                "strasse": street,
+                "hausnummer": house_number,
+                "plz": plz,
                 "link": it.get("link"),
                 # D-06: uniform DL-DE/Zero (= _LICENSE_RAW "dl-de-zero-2.0"); läuft
                 # durch dieselbe map_license-Logik (Kommentar-Fix Audit 2026-06-29:

@@ -1,6 +1,6 @@
 """Feiertage/Schulferien-Seed-Reader + reiner Mapper map_holidays (DATA-21).
 
-Liest die eingebetteten, committeten Seeds (``data/seeds/feiertage_<year>.json``
+Liest die eingebetteten, committeten Seeds (``data/seeds/holidays_<year>.json``
 und ``data/seeds/schulferien_<year>.json``) via stdlib ``json`` je Bundesland
 (``entry.state``-Kürzel) und bildet sie deterministisch auf einen
 ``CanonicalRecord`` mit ``HolidayPayload`` (kind="holiday") ab.
@@ -64,7 +64,7 @@ def _read_seed(filename: str, state: str) -> list[dict]:
 def load_holidays(state: str, year: int) -> dict:
     """Liest Feiertage + Schulferien je Bundesland aus den eingebetteten Seeds.
 
-    Liest ``data/seeds/feiertage_<year>.json`` und
+    Liest ``data/seeds/holidays_<year>.json`` und
     ``data/seeds/schulferien_<year>.json`` via stdlib ``json`` und extrahiert die
     Einträge für das Bundesland-Kürzel ``state`` (z. B. "BY"). Unbekanntes
     Bundesland oder fehlendes Jahr -> leere Listen (kein Crash, KEIN Fremd-API).
@@ -73,7 +73,7 @@ def load_holidays(state: str, year: int) -> dict:
         dict mit ``holidays`` und ``school_holidays`` (je list[dict]).
     """
     return {
-        "holidays": _read_seed(f"feiertage_{year}.json", state),
+        "holidays": _read_seed(f"holidays_{year}.json", state),
         "school_holidays": _read_seed(f"schulferien_{year}.json", state),
     }
 
@@ -97,7 +97,7 @@ def map_holidays(
     ``None``). ``geo`` bleibt ``None`` (Stadtebene, keine Punkt-Geometrie);
     ``observed_at`` bleibt ``None`` (statische Jahres-Fakten, kein Mess-Zeitstempel).
 
-    KRITISCH (Gray-Area, GOV-02/03): ``source=FEIERTAGE``, ``license_id=CC0``
+    KRITISCH (Gray-Area, GOV-02/03): ``source=HOLIDAYS``, ``license_id=CC0``
     (gemeinfreie Fakten), ``license_tier=A``. Die Attribution weist die
     gemeinfreie, KMK-validierte Herkunft aus. Leere Listen sind KEIN Fehler.
     """
@@ -106,7 +106,7 @@ def map_holidays(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.FEIERTAGE,
+        source=SourceId.HOLIDAYS,
         license_id=LicenseId.CC0,
         license_tier=LicenseTier.A,
         ags=ags,

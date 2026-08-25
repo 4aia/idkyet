@@ -18,6 +18,8 @@ ihre Teilmenge nach Redis), nur unnötiger Upstream-Traffic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from datetime import UTC, datetime
 
 import structlog
 
@@ -60,10 +62,22 @@ async def eround_status_poller(app, *, abo_id: str, interval_s: int = _INTERVAL_
                 # pullt nie selbst (strikte Entkopplung vom Request-Worker)
                 # und braucht einen frischen Stand fuer ok/no_data-Ehrlichkeit.
                 await store_latest_delta(app.state.redis, raw)
+                # Heartbeat: der Watchdog (check_pollers) liest bevorzugt
+                # heartbeat:eround. Nach store_latest_delta (laeuft IMMER, auch
+                # bei leerem points) einen ISO-Zeitstempel mit TTL 3x interval_s
+                # setzen. Muster des Lock-set: nur graceful, nie Crash der
+                # Schleife bei einem Redis-Fehler.
+                # Heartbeat nie crash-kritisch -> Redis-Fehler unterdruecken.
+                with contextlib.suppress(Exception):
+                    await app.state.redis.set(
+                        "heartbeat:eround",
+                        datetime.now(UTC).isoformat(),
+                        ex=3 * interval_s,
+                    )
         except asyncio.CancelledError:
             # Shutdown (Lifespan-finally cancelt die bg_tasks): sauber beenden.
             raise
-        except Exception as exc:  # noqa: BLE001 - eine Iteration darf nie crashen
+        except Exception as exc:
             log.warning("eround_status_poll_failed", error=type(exc).__name__)
         await asyncio.sleep(interval_s)
 
@@ -77,9 +91,18 @@ def maybe_start_eround_poller(app, settings, schedule) -> None:
     ``no_data``, der App-Start bleibt unverändert).
     """
     if not getattr(settings, "enable_eround_charging", False):
+        # Default-Zustand (Toggle aus) ist KEIN Fehler -> info, nicht warning.
+        log.info("eround_poller_not_started", reason="toggle_disabled")
         return
     abo_id = getattr(settings, "eround_charging_abo_id", None)
-    if getattr(app.state, "mobilithek_http", None) is None or not abo_id:
+    if getattr(app.state, "mobilithek_http", None) is None:
+        # Toggle an, aber kein mTLS-Client (Cert fehlt/defekt) -> laut warnen.
+        log.warning("eround_poller_not_started", reason="mobilithek_client_missing")
+        return
+    if not abo_id:
+        # Cert vorhanden, aber Abo-ID fehlt -> laut warnen.
+        log.warning("eround_poller_not_started", reason="abo_id_missing")
         return
 
+    log.info("eround_poller_started", interval_s=_INTERVAL_S)
     schedule(eround_status_poller(app, abo_id=abo_id))

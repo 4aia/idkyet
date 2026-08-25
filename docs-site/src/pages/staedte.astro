@@ -123,6 +123,16 @@ const coreCount = sorted.filter((c) => c.coverage === "full").length;
     Köln Verkehrslage, Berlin Verkehrsmeldungen) und die ÖPNV-Echtzeit für alle
     Städte:
   </p>
+  <p>
+    Den exakten Slug musst du dabei nicht kennen: der Stadtname wird tolerant
+    aufgelöst. Deutscher Name mit oder ohne Umlaute, beliebige Groß/Kleinschreibung
+    sowie gängige englische Namen und Kurzformen führen zum selben Ergebnis
+    (<code>München</code>, <code>münchen</code>, <code>munich</code>,
+    <code>munchen</code> lösen alle auf <code>muenchen</code> auf,
+    <code>cologne</code> auf <code>koeln</code>, <code>frankfurt</code> auf
+    <code>frankfurt-am-main</code>). Ein unbekannter Name liefert einen 404, dessen
+    Hinweis den nächstliegenden Slug vorschlägt („Meintest du …?").
+  </p>
   <ul>
     <li><code>/api/v1/cities/berlin/weather</code></li>
     <li><code>/api/v1/cities/berlin/air-uba</code></li>

@@ -44,7 +44,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from statistics import median
-from xml.etree.ElementTree import ParseError, fromstring  # noqa: S405
+from xml.etree.ElementTree import ParseError, fromstring
 
 import httpx
 
@@ -372,6 +372,10 @@ def _bbox(lat: float, lon: float, radius_deg: float) -> str:
 def _to_float(value: object) -> float | None:
     """Parst einen BRW-Wert defensiv zu float (None/leer/<=0/Unsinn -> None)."""
     if isinstance(value, bool) or value is None or value == "":
+        return None
+    # Nur int/float/str akzeptiert float(); alles andere -> None (wie zuvor
+    # der gefangene TypeError, nur jetzt statisch pruefbar).
+    if not isinstance(value, (int, float, str)):
         return None
     try:
         num = float(value)

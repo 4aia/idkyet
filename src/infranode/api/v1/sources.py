@@ -28,6 +28,27 @@ router = APIRouter()
 # User-String interpretiert wird (nie in eine Query/einen Cache-Key interpoliert).
 _SOURCES_SORT_WHITELIST = {"source", "enabled", "license"}
 
+# Quellen, die von MEHREREN enable_*-Flags gespeist werden: die "genesis"-Fassade
+# liefert Demografie/Krankenhaus (enable_genesis) UND das Regio-Trio unemployment/
+# tourism/construction (enable_genesis_regio, ueber www.regionalstatistik.de). Ihr
+# enabled ist wahr, sobald IRGENDEIN speisendes Flag an ist; sonst meldete /sources
+# genesis faelschlich disabled, obwohl unemployment/tourism live ausliefern
+# (beobachtet 2026-07-17). Andere Quellen bleiben beim generischen enable_<name>.
+_SOURCE_ENABLE_FLAGS: dict[str, tuple[str, ...]] = {
+    "genesis": ("enable_genesis", "enable_genesis_regio"),
+}
+
+
+def _source_enabled(settings, name: str) -> bool:
+    """Ist die Quelle aktiv? enabled, sobald IRGENDEIN speisendes enable_*-Flag an ist.
+
+    Default (keine Sonderregel): das generische ``enable_<name>``. Fuer Quellen mit
+    mehreren speisenden Flags (``_SOURCE_ENABLE_FLAGS``) reicht EIN gesetztes Flag.
+    """
+    flags = _SOURCE_ENABLE_FLAGS.get(name, (f"enable_{name}",))
+    return any(bool(getattr(settings, flag, False)) for flag in flags)
+
+
 # _KNOWN_SOURCES (Reihenfolge = öffentliche /sources-Reihenfolge) und
 # SOURCE_LICENSE (Lizenz + wortgenaue Attribution, VERBATIM aus
 # DATA-LICENSES.md, fail-closed via tests/unit/test_source_license_map.py)
@@ -64,7 +85,7 @@ async def sources(
     data = [
         {
             "source": name,
-            "enabled": bool(getattr(settings, f"enable_{name}", False)),
+            "enabled": _source_enabled(settings, name),
             "breaker_state": breakers.get(name).state.value,
             "license": SOURCE_LICENSE.get(name, {}).get("license_id"),
             "attribution": SOURCE_LICENSE.get(name, {}).get("attribution"),
@@ -75,8 +96,9 @@ async def sources(
     # Whitelist-gesicherte Sortierung VOR dem Slice (sort nur aus der Whitelist,
     # sonst 400 in paginate). order steuert die Richtung, beides ist validiert.
     if page.sort:
+        sort_key = page.sort
         data.sort(
-            key=lambda row: (row.get(page.sort) is None, row.get(page.sort)),
+            key=lambda row: (row.get(sort_key) is None, row.get(sort_key)),
             reverse=(page.order == "desc"),
         )
 

@@ -1,4 +1,4 @@
-"""Muenchen-Raddauerzählstellen-Adapter ``fetch_muenchen_radzaehl`` (DATA-40, Tier A).
+"""Muenchen-Raddauerzählstellen-Adapter ``fetch_muenchen_bike_counts`` (DATA-40).
 
 Liefert die Tages-Radzählwerte der Münchner Dauerzählstellen (6 Stationen,
 z.B. Erhardt/Olympia/Hirsch) keylos als kanonisches Zählstellen-dict. Zwei
@@ -163,7 +163,7 @@ def _parse_latest_day(text: str) -> dict[str, dict]:
     return by_station_date
 
 
-async def fetch_muenchen_radzaehl(
+async def fetch_muenchen_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,
@@ -185,7 +185,7 @@ async def fetch_muenchen_radzaehl(
     ``year`` (keyword-only) wählt das Jahres-CKAN-Paket (kommt aus ``retrieved_at``,
     damit der Adapter rein bleibt).
 
-    Rückgabe-Keys (exakt das, was ``map_muenchen_radzaehl`` erwartet): ``slug``,
+    Rückgabe-Keys (exakt das, was ``map_muenchen_bike_counts`` erwartet): ``slug``,
     ``stations`` (je Station Stammdaten + Tageswert) und ``as_of`` (jüngstes
     Datum als ISO-String oder None).
     """

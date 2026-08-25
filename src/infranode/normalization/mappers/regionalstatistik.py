@@ -69,12 +69,20 @@ def map_tax_rates(
     injiziert (kein ``datetime.now()`` im Mapper). Die Join-Keys ``ags``/
     ``wikidata_qid`` werden aus dem Register durchgereicht.
     """
+    # Kanonische englische Namen; die abgekündigten deutschen Felder tragen
+    # identische Werte. Auch Bestands-Zeilen ohne die neuen Spalten werden so
+    # befüllt (Abkündigung 2026-08-01).
     payload = TaxRatesPayload(
         gewerbesteuer_hebesatz=row.get("gewerbesteuer"),
         grundsteuer_a=row.get("grundsteuer_a"),
         grundsteuer_b=row.get("grundsteuer_b"),
         grundsteuer_c=row.get("grundsteuer_c"),
         stichtag=row.get("stichtag"),
+        trade_tax_rate=row.get("gewerbesteuer"),
+        property_tax_a=row.get("grundsteuer_a"),
+        property_tax_b=row.get("grundsteuer_b"),
+        property_tax_c=row.get("grundsteuer_c"),
+        reference_date=row.get("stichtag"),
     )
     return _record(
         slug, payload, retrieved_at=retrieved_at, ags=ags, wikidata_qid=wikidata_qid
@@ -95,11 +103,17 @@ def map_business_registrations(
     ``saldo``/``jahr``, Tabelle 52311). ``retrieved_at`` wird injiziert. Die
     Join-Keys ``ags``/``wikidata_qid`` werden aus dem Register durchgereicht.
     """
+    # Kanonische englische Namen; die abgekündigten deutschen Felder tragen
+    # identische Werte (Abkündigung 2026-08-01).
     payload = BusinessRegistrationsPayload(
         anmeldungen=row.get("anmeldungen"),
         abmeldungen=row.get("abmeldungen"),
         saldo=row.get("saldo"),
         jahr=row.get("jahr"),
+        registrations=row.get("anmeldungen"),
+        deregistrations=row.get("abmeldungen"),
+        balance=row.get("saldo"),
+        year=row.get("jahr"),
     )
     return _record(
         slug, payload, retrieved_at=retrieved_at, ags=ags, wikidata_qid=wikidata_qid
@@ -121,10 +135,15 @@ def map_insolvencies(
     ISV007). ``retrieved_at`` wird injiziert (kein ``datetime.now()`` im Mapper).
     Die Join-Keys ``ags``/``wikidata_qid`` werden aus dem Register durchgereicht.
     """
+    # Kanonische englische Namen; die abgekündigten deutschen Felder tragen
+    # identische Werte (Abkündigung 2026-08-01).
     payload = InsolvenciesPayload(
         unternehmensinsolvenzen=row.get("unternehmensinsolvenzen"),
         uebrige_schuldner_insolvenzen=row.get("uebrige_schuldner_insolvenzen"),
         jahr=row.get("jahr"),
+        corporate_insolvencies=row.get("unternehmensinsolvenzen"),
+        other_debtor_insolvencies=row.get("uebrige_schuldner_insolvenzen"),
+        year=row.get("jahr"),
     )
     return _record(
         slug, payload, retrieved_at=retrieved_at, ags=ags, wikidata_qid=wikidata_qid

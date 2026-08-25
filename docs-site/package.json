@@ -8,9 +8,11 @@
   },
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "node scripts/check-endpoint-count.mjs",
     "build": "astro build",
     "postbuild": "pagefind --site dist",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "check:endpoint-count": "node scripts/check-endpoint-count.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.3",

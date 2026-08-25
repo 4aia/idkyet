@@ -40,15 +40,24 @@ data/mastr/
 data/delfi/
 data/bkg/
 data/bundeswahl/
-data/divi/
 data/cache/
 # Collector-Laufzeitausgabe (volume-persistent auf der Box, Pitfall 2): runs.db
 # (WAL inkl. -wal/-shm) + Roh-Snapshots. Nie committen.
 data/ops/
+# Ops-Skripte bleiben AUSSERHALB des Repos (CLAUDE.md): sie tragen Server-Pfade,
+# Volume-Namen und das ntfy-Alerts-Topic, das ohne Auth ein geteiltes Geheimnis
+# ist. Die Refresh-/Sync-Skripte liegen auf der Box unter /opt/infranode/ops/
+# bzw. im privaten Backup-Ordner. ops/*.py (z.B. drill_verify.py) bleibt
+# versioniert, dort steht nichts Betriebsinternes.
+ops/*.sh
 data/snapshots/
 # eRound-Geo-Map-Laufzeitkopie (DATA-42, taeglicher Ingest ins Volume); der
 # committete Erststand liegt als Seed unter data/seeds/eround_geo_map.json.
 data/eround/
+# DB-IP-Lite-Datenbanken (Country + ASN) fuer den Admin-Traffic-Tab. Laedt
+# scripts/update_geoip.py; die mmdb-Dateien gehoeren NIE ins Repo (gross,
+# monatlich neu, lokal generiert). Nur der Zielordner wird ignoriert, nicht data/.
+data/geoip/
 *.gtfs
 *.zip
 *.parquet

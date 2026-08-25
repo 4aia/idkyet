@@ -40,20 +40,20 @@ const mcpRemoteConfig = [
 // The server's 12 tools (source: docs/mcp-install.md).
 const coreTools = [
   ["get_city(slug)", "City master data (population, area, coordinates)"],
-  ["get_city_overview(slug)", "One-call overview: catalog of all 67 data types with key and coverage status + live highlights (discovery entry point)"],
-  ["get_city_resource(slug, resource)", "Generic access to all 67 data types by data type key (see list below)"],
+  ["get_city_overview(slug)", "One-call overview: catalog of all 82 data types with key and coverage status + live highlights (discovery entry point)"],
+  ["get_city_resource(slug, resource)", "Generic access to all 82 data types by data type key (see list below)"],
   ["air_quality(slug)", "Official air quality: PM10, PM2.5, NO2, O3, SO2 (UBA)"],
   ["weather(slug)", "Current weather observations (DWD, not a forecast)"],
   ["pois(slug, type)", "Points of interest, filtered by type (OpenStreetMap)"],
   ["station_board_departures(eva)", "Live departures of any station by EVA number, all categories incl. local trains + disruptions (DB Timetables)"],
   ["station_board_arrivals(eva)", "Live arrivals of any station by EVA number, all categories incl. local trains + disruptions (DB Timetables)"],
-  ["transit_departures(slug, stop_id?)", "Live public-transport departures with delays (GTFS-RT/HVV/VGN)"],
+  ["transit_departures(slug, stop_id?)", "Live public-transport departures with delays (GTFS-RT/HVV/VGN; Berlin prefers VBB CC-BY 4.0)"],
   ["list_cities()", "List of all covered cities (slugs, coverage)"],
   ["sources()", "All data sources with licence and availability"],
   ["compare(resource, cities)", "Compare one resource (weather, air, indicators, demographics, unemployment, tourism, charging-status, weather-warnings) across several cities"],
 ];
 
-// The 67 data types, grouped by topic (source: docs/mcp-install.md).
+// The 82 data types, grouped by topic (source: docs/mcp-install.md).
 // Display key = resource key for get_city_resource (kebab-case).
 // Data types with a dedicated tool are marked in the description.
 const dataTypeGroups = [
@@ -88,11 +88,15 @@ const dataTypeGroups = [
       ["charging-status", "EV charging occupancy (live, all 84 cities)"],
       ["road-events", "Road and construction notices"],
       ["parking", "Live parking occupancy per city: vacant spaces and occupancy (Dortmund, Frankfurt am Main, Wuppertal)"],
+      ["parking-onstreet", "On-street parking per city: spaces and parking rule per street section, parking management areas, accessible bays, loading zones (Munich only)"],
+      ["park-and-ride", "Park & ride and bike & ride facilities per city: spaces, prices, transit access and occupancy forecast (Munich only)"],
+      ["mobility-points", "Mobility points and car-sharing parking areas per city (Munich only)"],
+      ["bike-parking", "Bike parking facilities per city: in-service stock, spaces, construction type, covering, bike-and-ride (Munich only)"],
       ["vehicle-registrations", "Car stock and electric vehicle share (KBA)"],
       ["accidents", "Road traffic accidents per county (accident atlas)"],
       ["crime-stats", "Crime statistics per main offence group: cases, frequency per 100k, clearance rate (BKA PKS)"],
       ["fuel-prices", "Fuel prices per city, aggregated (Tankerkönig)"],
-      ["sharing", "Bike and scooter sharing per city, aggregated (GBFS/Nextbike)"],
+      ["sharing", "Bike and scooter sharing per city, aggregated (GBFS)"],
       ["bike-counts", "Bike counters per city: municipal continuous cycling-count stations (municipal open data, partial coverage)"],
       ["station-departures", "Live departures at each city's main station with delays (DB Timetables)"],
       ["station-arrivals", "Live arrivals at each city's main station with delays (DB Timetables)"],
@@ -112,7 +116,6 @@ const dataTypeGroups = [
     title: "Health and energy",
     types: [
       ["health", "Health data"],
-      ["icu-live", "ICU beds, live"],
       ["hospitals-atlas", "Hospital locations from the federal clinic atlas"],
       ["energy", "Energy installations (market master data register)"],
       ["power-load", "Electricity consumption / grid load per control zone (SMARD)"],
@@ -129,6 +132,16 @@ const dataTypeGroups = [
       ["tourism", "Guest overnight stays and arrivals (tourism)"],
       ["construction", "Building permits (residential buildings and dwellings)"],
       ["indicators", "Socioeconomic indicators per county (INKAR/BBSR, ~70 metrics)"],
+      ["sustainability", "Sustainability and SDG indicators per municipality as a time series from 2006 to 2023 (Wegweiser Kommune, Bertelsmann Stiftung, CC0)"],
+      ["population-structure", "Age structure per city as a time series: count and share per age group, by gender and generation, actuals from 2006 and forecast to 2040 (Wegweiser Kommune, CC0)"],
+      ["population-trend", "Population trend as a time series: change in age groups, birth and death rates, migration balance (Wegweiser Kommune, CC0)"],
+      ["municipal-finance", "Municipal finances as a time series: tax multipliers, tax capacity, debt, investment, social spending (Wegweiser Kommune, CC0)"],
+      ["labour-market", "Labour market and commuters as a time series: unemployment and employment rates, in- and out-commuters (Wegweiser Kommune, CC0)"],
+      ["integration", "Integration as a time series: population shares, employment, education, naturalisations (Wegweiser Kommune, CC0)"],
+      ["childcare", "Childcare as a time series: care rates by age, type of care and hours, 83 cities (Wegweiser Kommune, CC0)"],
+      ["education-stats", "Education statistics as a time series: school qualifications, apprentices, further education, 70 cities (Wegweiser Kommune, CC0)"],
+      ["social-situation", "Social situation as a time series: SGB II rates, old-age poverty, basic income support, over-indebtedness (Wegweiser Kommune, CC0)"],
+      ["care", "Long-term care as a time series: people in need of care, care rate, outpatient and inpatient, forecast to 2030, 73 cities (Wegweiser, CC0)"],
       ["land-values", "Official land values per city, aggregated (BORIS, building land)"],
       ["tax-rates", "Local tax multipliers per municipality: trade tax and property tax A/B/C (Regionalstatistik)"],
       ["business-registrations", "Business registrations/deregistrations and net per district (Regionalstatistik)"],
@@ -146,6 +159,7 @@ const dataTypeGroups = [
       ["holidays", "Public holidays"],
       ["heritage", "Listed heritage monuments per city from the state register (Berlin, DL-DE/Zero)"],
       ["office-wait-times", "Government office wait times per city: live wait at citizen/vehicle-registration offices (Cologne only, partial coverage)"],
+      ["council-papers", "Council information per city: council papers, motions and resolutions from the council information systems (OParl; Dresden, Cologne, Düsseldorf, Münster, Leipzig)"],
     ],
   },
   {
@@ -180,11 +194,15 @@ const faq = [
   },
   {
     q: "What data does the InfraNode MCP server provide?",
-    a: "12 lean tools covering 67 data types of 84 major German cities: master data, air quality, weather, weather warnings and civil protection warnings, public transit incl. live departures, traffic, live parking occupancy, water levels and flooding, health, energy and power market, solar and district heating, car stock and electric share, unemployment, tourism, building permits, road accidents, fuel prices, land values, local tax multipliers and business registrations, insolvencies, bike and scooter sharing, bike counters, POIs, events, elections and holidays, station departures and arrivals, public procurement, government office wait times (Cologne only), plus a cities and a sources overview, and a multi-city comparison.",
+    a: "12 lean tools covering 82 data types of 84 major German cities: master data, air quality, weather, weather warnings and civil protection warnings, public transit incl. live departures, traffic, live parking occupancy, on-street parking, park & ride and bike parking, water levels and flooding, health, energy and power market, solar and district heating, car stock and electric share, unemployment, tourism, building permits, road accidents, fuel prices, land values, local tax multipliers and business registrations, insolvencies, sustainability and SDG indicators as a time series since 2006, population age structure and trend with a forecast to 2040, municipal finances, labour market and commuters, integration, childcare, education statistics, social situation and long-term care, bike and scooter sharing, bike counters, POIs, events, elections and holidays, station departures and arrivals, public procurement, government office wait times (Cologne only), plus a cities and a sources overview, and a multi-city comparison.",
   },
   {
     q: "Why does the InfraNode MCP server have only 12 tools?",
-    a: "12 lean tools cover 67 data types: the generic accessor get_city_resource(slug, resource) fetches any data type by its key, and get_city_overview returns all keys with coverage status per city. This keeps the token footprint in the agent's context window minimal, stays well below client tool limits (e.g. 80 tools in Cursor), and the data breadth keeps growing without adding new tools.",
+    a: "12 lean tools cover 82 data types: the generic accessor get_city_resource(slug, resource) fetches any data type by its key, and get_city_overview returns all keys with coverage status per city. This keeps the token footprint in the agent's context window minimal, stays well below client tool limits (e.g. 80 tools in Cursor), and the data breadth keeps growing without adding new tools.",
+  },
+  {
+    q: "Do I need to know the exact city slug?",
+    a: "No. City names are resolved leniently: the German name with or without umlauts, any casing, common English exonyms and short forms all resolve to the same city (München, münchen, munich, munchen all resolve to muenchen; cologne to koeln; frankfurt to frankfurt-am-main). An unrecognized name returns a 404 whose hint suggests the closest slug (Meintest du ...?). list_cities returns the canonical slugs.",
   },
   {
     q: "My MCP client only supports local stdio servers. How do I connect InfraNode?",
@@ -203,7 +221,7 @@ const faq = [
 
 <Docs
   title="Open Data MCP Server for Germany (AI agents)"
-  description="Open data MCP server for German cities: 12 lean tools covering 67 data types, for AI agents like Claude and ChatGPT, hosted at mcp.infranode.dev, remote over Streamable HTTP, no install, no API key, free."
+  description="Open data MCP server for German cities: 12 lean tools covering 82 data types, for AI agents like Claude and ChatGPT, hosted at mcp.infranode.dev, remote over Streamable HTTP, no install, no API key, free."
   current="mcp"
   lang="en"
   altLangPath="/mcp/"
@@ -212,14 +230,14 @@ const faq = [
     slot="jsonld"
     type="SoftwareApplication"
     name="InfraNode MCP server"
-    description="Hosted MCP server with 12 lean tools covering 67 data types of open city data for 84 major German cities, key-free and free of charge."
+    description="Hosted MCP server with 12 lean tools covering 82 data types of open city data for 84 major German cities, key-free and free of charge."
   />
   <JsonLd slot="jsonld" type="FAQPage" faq={faq} />
 
   <h1>Open data MCP server for German cities</h1>
   <p>
     The InfraNode MCP server is a free, hosted Model Context Protocol server that
-    gives AI agents access to 67 data types of open data for 84 major German
+    gives AI agents access to 82 data types of open data for 84 major German
     cities through 12 lean tools, with no API key. It exposes the city data as
     tools an agent calls directly, so you do not write HTTP calls by hand. The
     server is listed in the official
@@ -240,6 +258,18 @@ const faq = [
     no per-city signup and no local install. How InfraNode compares to other MCP
     servers for German and European data is shown in the
     <a href="/en/mcp-comparison/">MCP server comparison</a>.
+  </p>
+
+  <h2 id="city-names">City names are lenient, you don't need the exact slug</h2>
+  <p>
+    City names are resolved leniently. Write the German name with or without
+    umlauts, casing does not matter, and common English exonyms and short forms
+    work too: <code>München</code>, <code>münchen</code>, <code>munich</code> and
+    <code>munchen</code> all resolve to <code>muenchen</code>, <code>cologne</code>
+    to <code>koeln</code>, <code>frankfurt</code> to <code>frankfurt-am-main</code>.
+    If a name is not recognized you get a 404 whose hint suggests the closest slug
+    (“Meintest du …?"). The <code>list_cities</code> tool returns the canonical
+    slugs at any time.
   </p>
 
   <h2>Data tools by topic</h2>
@@ -307,7 +337,7 @@ const faq = [
 
   <h2>The 12 tools</h2>
   <p>
-    The server provides 12 lean tools that together cover 67 data types. This
+    The server provides 12 lean tools that together cover 82 data types. This
     keeps the token footprint in the agent's context window minimal, stays well
     below the tool limits of common MCP clients (e.g. 80 tools in Cursor), and
     the data breadth keeps growing without adding new tools.
@@ -354,7 +384,7 @@ const faq = [
     need no argument.
   </p>
 
-  <h2>The 67 data types</h2>
+  <h2>The 82 data types</h2>
   <p>
     Any data type without a dedicated tool is fetched via
     <code>get_city_resource</code>, passing the data type key as the
@@ -393,7 +423,7 @@ const faq = [
   <h2>Example call</h2>
   <p>
     An agent fetches the one-call overview for Berlin: base data, a catalog of
-    all 67 data types with key and coverage status, and a live-highlights
+    all 82 data types with key and coverage status, and a live-highlights
     snapshot. A good entry point for any city question, instead of guessing a
     single data type. The result is the live API's normalised JSON, passed
     through unchanged.

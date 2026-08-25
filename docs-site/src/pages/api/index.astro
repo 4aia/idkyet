@@ -1,0 +1,173 @@
+---
+// Uebersichtsseite der API-Referenz (/api/). Bis hierhin gab es unter /api/
+// nur die Detailseiten /api/<operationId>/, der Einstieg selbst lief in die
+// 404-Seite, obwohl die Navigation eine Gruppe "API-Referenz" fuehrt.
+//
+// Die Seite listet ALLE Operationen der endpoints-Collection nach denselben
+// Kategorien wie die Sidebar (endpoint-categories), damit Nutzer und Agenten
+// einen vollstaendigen Index in einem Dokument haben. Quelle ist wie ueberall
+// docs/openapi.yaml; Zahlen werden gezaehlt, nie hartkodiert (das
+// Endpunktzahl-Gate prueft nur README und Startseiten, eine dritte
+// Fundstelle waere eine neue Driftquelle).
+import { getCollection } from "astro:content";
+import Docs from "../../layouts/Docs.astro";
+import JsonLd from "../../components/JsonLd.astro";
+import { CATEGORIES, CATEGORY_OF } from "../../data/endpoint-categories";
+import { NAV_HIDDEN } from "../../data/endpoint-labels";
+
+const endpoints = await getCollection("endpoints");
+
+type Row = {
+  id: string;
+  method: string;
+  path: string;
+  summary: string;
+};
+
+// Deprecation-Aliasse (NAV_HIDDEN) bleiben aussen vor, genau wie in der
+// Sidebar: ihre Seiten existieren weiter, sie sollen aber niemanden mehr in
+// eine abgekuendigte Route locken.
+const byCat = new Map<string, Row[]>();
+for (const entry of endpoints) {
+  const e = entry.data;
+  if (NAV_HIDDEN.has(e.id)) continue;
+  const cat = CATEGORY_OF[e.id] ?? "sonstige";
+  if (!byCat.has(cat)) byCat.set(cat, []);
+  byCat.get(cat)!.push({
+    id: e.id,
+    method: e.method.toUpperCase(),
+    path: e.path,
+    summary: e.summary || e.id,
+  });
+}
+for (const rows of byCat.values()) {
+  rows.sort((a, b) => a.path.localeCompare(b.path, "de"));
+}
+
+const shown = CATEGORIES.filter((c) => byCat.has(c.id));
+const total = [...byCat.values()].reduce((n, rows) => n + rows.length, 0);
+
+const title = `API-Referenz: alle ${total} Endpunkte`;
+const description =
+  `Vollstaendiger Index der InfraNode-REST-API: ${total} Endpunkte fuer 84 ` +
+  `deutsche Grossstaedte, nach Thema gruppiert. Keylos, kostenlos, ohne ` +
+  `Registrierung.`;
+---
+
+<Docs title={title} description={description} lang="de" altLangPath="/en/api/">
+  <JsonLd
+    data={{
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: `InfraNode API-Referenz`,
+      description,
+      url: "https://infranode.dev/api/",
+      isPartOf: { "@type": "WebSite", url: "https://infranode.dev/" },
+    }}
+  />
+
+  <h1>API-Referenz</h1>
+  <p>
+    Die InfraNode-API liefert offene Daten zu 84 deutschen Grossstaedten ueber
+    <strong>{total} Endpunkte</strong>, gruppiert nach Thema. Jeder Endpunkt hat
+    eine eigene Seite mit Parametern, Beispielaufrufen fuer curl, JavaScript und
+    Python sowie einer Try-it-Konsole.
+  </p>
+  <p>
+    Alle Endpunkte sind <strong>keylos</strong> und lesend. Die Antwort folgt
+    immer demselben Envelope aus <code>data</code> und <code>meta</code>; ein
+    fehlender Upstream fuehrt zu einem ehrlichen
+    <code>source_status</code> statt zu einem Fehler. Die maschinenlesbare
+    Spezifikation liegt unter <a href="/api/getOpenApiSpec/">/api/v1/openapi.yaml</a>.
+  </p>
+
+  <nav class="api-index__jump" aria-label="Themen">
+    <ul>
+      {
+        shown.map((cat) => (
+          <li>
+            <a href={`#${cat.id}`}>
+              {cat.de} <span class="api-index__count">{byCat.get(cat.id)!.length}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+
+  {
+    shown.map((cat) => (
+      <section class="api-index__cat">
+        <h2 id={cat.id}>
+          {cat.de} <span class="api-index__count">{byCat.get(cat.id)!.length}</span>
+        </h2>
+        <table class="api-index__table">
+          <thead>
+            <tr>
+              <th scope="col">Methode</th>
+              <th scope="col">Pfad</th>
+              <th scope="col">Beschreibung</th>
+            </tr>
+          </thead>
+          <tbody>
+            {byCat.get(cat.id)!.map((row) => (
+              <tr>
+                <td><code class="api-index__method">{row.method}</code></td>
+                <td>
+                  <a href={`/api/${row.id}/`}><code>{row.path}</code></a>
+                </td>
+                <td>{row.summary}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    ))
+  }
+</Docs>
+
+<style>
+  .api-index__jump ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    list-style: none;
+    padding: 0;
+    margin: 1.5rem 0 2rem;
+  }
+  .api-index__jump a {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+  .api-index__count {
+    display: inline-block;
+    margin-left: 0.35rem;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85em;
+  }
+  .api-index__cat {
+    margin-top: 2.5rem;
+  }
+  .api-index__table {
+    width: 100%;
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+  }
+  .api-index__table th,
+  .api-index__table td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+    vertical-align: top;
+  }
+  .api-index__method {
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+</style>

@@ -34,6 +34,16 @@ _MAX_FEED_BYTES = 128 * 1024 * 1024  # 128 MiB
 # der Host wird NIE aus Config/User-Input/Funktionsargument zusammengesetzt.
 _GTFS_DE_FEED_URL = "https://realtime.gtfs.de/realtime-free.pb"
 
+# VBB-Berlin-Feed-URL HARTKODIERT (T-kzd-01, SSRF-Invariante, analog _GTFS_DE_FEED_URL):
+# der Host wird NIE aus Config/User-Input/Funktionsargument zusammengesetzt. Der
+# Upstream liefert HTTP 200 NUR mit Header ``Accept: */*`` (ein restriktiver Accept
+# ergibt 406); der Feed ist ~11,5 MB protobuf (FULL_DATASET), keylos, CC-BY 4.0.
+_VBB_FEED_URL = "https://production.gtfsrt.vbb.de/data"
+
+# Accept-Header, den der VBB-Upstream verlangt (sonst 406). Bewusst als Konstante,
+# nicht inline, damit die SSRF-/Header-Invariante an einer Stelle steht.
+_VBB_ACCEPT_HEADER = {"Accept": "*/*"}
+
 
 def parse_trip_updates(body: bytes) -> list[dict]:
     """Parst einen GTFS-RT-Feed (protobuf) zu kompakten Trip-Update-dicts.
@@ -65,7 +75,9 @@ def parse_trip_updates(body: bytes) -> list[dict]:
     # Import erst nach dem Size-Cap (kein teurer Import bei abgelehntem Body).
     from google.transit import gtfs_realtime_pb2
 
-    feed = gtfs_realtime_pb2.FeedMessage()
+    # FeedMessage entsteht in der protobuf-Generierung erst zur Laufzeit
+    # (kein statisch sichtbares Attribut im pb2-Modul).
+    feed = gtfs_realtime_pb2.FeedMessage()  # pyright: ignore[reportAttributeAccessIssue]
     # protobuf parst defensiv ohne Entity-Expansion (T-19-PARSE, accept); der
     # Size-Cap oben deckt den DoS-Vektor ab, daher kein zusätzlicher Guard.
     feed.ParseFromString(body)
@@ -165,6 +177,14 @@ async def fetch_gtfs_rt_feed(
         url = build_pull_url(abo_id, style="container")
         result = await pull_subscription(mtls_client, url)
         return result["body"]  # None bei 422 = no_data
+
+    if source == "vbb":
+        # VBB-Berlin (keylos, CC-BY 4.0): GET auf den hartkodierten VBB-Host MIT
+        # Accept:*/* (ein restriktiver Accept liefert 406). Size-Cap greift beim
+        # Parse (_MAX_FEED_BYTES); raise_for_status schlägt 5xx an die Fassade durch.
+        resp = await http.get(_VBB_FEED_URL, headers=_VBB_ACCEPT_HEADER)
+        resp.raise_for_status()
+        return resp.content
 
     resp = await http.get(_GTFS_DE_FEED_URL)
     resp.raise_for_status()

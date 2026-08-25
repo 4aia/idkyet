@@ -1,8 +1,8 @@
 """Reiner Hamburg-Verkehrslage-Mapper (DATA-26, Tier A DL-DE/BY, keylos).
 
-Übersetzt das rohe Adapter-dict aus ``adapters/hamburg_verkehrslage.py``
+Übersetzt das rohe Adapter-dict aus ``adapters/hamburg_traffic_situation.py``
 deterministisch in einen ``CanonicalRecord``:
-- ``map_hamburg_verkehrslage``: ``segments`` (nicht-fließende Straßenabschnitte)
+- ``map_hamburg_traffic_situation``: ``segments`` (nicht-fließende Straßenabschnitte)
   + ``summary`` (Netz-Zählung je Zustandsklasse) -> ``TrafficFlowPayload``.
 
 Schablone ist ``mappers/mobilithek_koeln.py`` (map_koeln_traffic_flow): rein
@@ -49,7 +49,7 @@ def _parse_as_of(raw: dict) -> datetime | None:
         return None
 
 
-def map_hamburg_verkehrslage(
+def map_hamburg_traffic_situation(
     raw: dict,
     *,
     retrieved_at: datetime,
@@ -69,7 +69,7 @@ def map_hamburg_verkehrslage(
         geo=None,
         observed_at=_parse_as_of(raw),
         retrieved_at=retrieved_at,
-        source=SourceId.HAMBURG_VERKEHRSLAGE,
+        source=SourceId.HAMBURG_TRAFFIC_SITUATION,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

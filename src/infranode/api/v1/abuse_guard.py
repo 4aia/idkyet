@@ -66,7 +66,7 @@ def _make_storage(settings: Settings):
             "(pro-Prozess, nicht replica-geteilt).",
             uri,
         )
-    except Exception as exc:  # noqa: BLE001 - jeder Storage-Init-Fehler -> Fallback
+    except Exception as exc:
         logger.warning(
             "AbuseGuard: Redis-Storage-Init fehlgeschlagen (%s): %s", uri, exc
         )
@@ -76,7 +76,7 @@ def _make_storage(settings: Settings):
 class AbuseGuardMiddleware(BaseHTTPMiddleware):
     """Subnetz-Rate-Limit + optionaler CF-Bot-Score-Block (läuft vor dem IP-Limit)."""
 
-    def __init__(self, app) -> None:  # noqa: ANN001 - Starlette-App
+    def __init__(self, app) -> None:
         super().__init__(app)
         s = Settings()
         self._bot_score_min = s.bot_score_min
@@ -121,8 +121,9 @@ class AbuseGuardMiddleware(BaseHTTPMiddleware):
                         hint="Automatisierter Zugriff erkannt (niedriger Bot-Score).",
                     )
 
-        # 2. Aggregiertes Subnetz-Limit gegen verteilte Bots.
-        if self._limiter is not None:
+        # 2. Aggregiertes Subnetz-Limit gegen verteilte Bots. (_item ist gesetzt,
+        # wann immer _limiter gesetzt ist; beide Checks fuer die Optional-Kette.)
+        if self._limiter is not None and self._item is not None:
             net = subnet_of(real_client_ip(request), self._v4, self._v6)
             if not self._limiter.hit(self._item, "subnet", net):
                 response = _envelope(

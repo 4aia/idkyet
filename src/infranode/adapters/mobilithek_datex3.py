@@ -36,7 +36,7 @@ die Fassade) und schreibt KEIN Archiv.
 from __future__ import annotations
 
 import io
-from xml.etree.ElementTree import iterparse  # noqa: S405
+from xml.etree.ElementTree import iterparse
 
 from infranode.adapters.mobilithek_datex2 import _guard, _localname
 from infranode.infra.mobilithek import build_pull_url, pull_subscription
@@ -204,7 +204,7 @@ def parse_parking_status_v3(xml_bytes: bytes, *, slug: str) -> dict:
 
     facilities: list[dict] = []
     bio = io.BytesIO(xml_bytes)
-    # noqa S314: stdlib-Parse bewusst (Decision 1); XXE/DoS-Mitigation ist
+
     # _guard oben (untrusted Live-Feed).
     for _event, elem in iterparse(bio):  # noqa: S314
         if _localname(elem.tag) != _STATUS_TAG:

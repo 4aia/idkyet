@@ -1,4 +1,4 @@
-"""Hamburg-Radzählstelle-Adapter ``fetch_hamburg_radzaehl`` (DATA-40, Tier A).
+"""Hamburg-Radzählstelle-Adapter ``fetch_hamburg_bike_counts`` (DATA-40, Tier A).
 
 Liefert den jüngsten Stundenwert der Hamburger Rad-Dauerzählstelle "Gurlittinsel"
 (die FHH betreibt aktuell genau diese eine offene Dauerzählstelle) keylos aus dem
@@ -60,7 +60,7 @@ def _to_iso(datum: str, zeit: str) -> str | None:
         return None
 
 
-async def fetch_hamburg_radzaehl(
+async def fetch_hamburg_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,
@@ -70,7 +70,7 @@ async def fetch_hamburg_radzaehl(
 ) -> dict:
     """Holt den jüngsten Stundenwert der Hamburger Rad-Dauerzählstelle.
 
-    GET des CSV-Exports (cp1252), Stationsname aus Zeile 1, dann die LETZTE
+    GET des CSV-Exports (utf-8), Stationsname aus Zeile 1, dann die LETZTE
     Datenzeile mit gültiger Anzahl als frischster Stundenwert. ``lat``/``lon``/
     ``radius_km`` sind vertragskonform Teil der Signatur (ungenutzt; eine feste
     Station). Rueckgabe: ``slug``, ``stations`` (0 oder 1) und ``as_of``.

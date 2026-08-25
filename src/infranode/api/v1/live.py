@@ -20,14 +20,17 @@ Der Prefix ``/live`` und der Tag "Live" werden beim ``include_router`` in
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from asgi_correlation_id import correlation_id
 from fastapi import APIRouter, Request, Response
 
 from infranode.adapters.dortmund_parking import fetch_dortmund_parking
-from infranode.adapters.hamburg_verkehrslage import fetch_hamburg_verkehrslage
+from infranode.adapters.efa import fetch_efa_departures
+from infranode.adapters.hamburg_verkehrslage import fetch_hamburg_traffic_situation
 from infranode.adapters.hvv_geofox import fetch_hvv_departures
 from infranode.adapters.mobilithek_datex2 import (
     fetch_datex2,
@@ -35,13 +38,15 @@ from infranode.adapters.mobilithek_datex2 import (
     fetch_wuppertal_parking,
 )
 from infranode.adapters.mobilithek_datex3 import fetch_frankfurt_parking
+from infranode.adapters.rmv import fetch_rmv_departures
 from infranode.adapters.vgn import fetch_vgn_departures
-from infranode.api.errors import UpstreamError, ValidationFailedError
+from infranode.api.errors import NotFoundError, UpstreamError, ValidationFailedError
 from infranode.api.v1 import cities
 from infranode.charging.store import read_latest_delta
 from infranode.config import Settings
 from infranode.infra.cache import build_cache_key
 from infranode.normalization.enums import SourceId
+from infranode.normalization.mappers.efa import map_efa_departures
 from infranode.normalization.mappers.gtfs_rt import (
     attribution_for_source,
     map_transit_departures,
@@ -49,7 +54,7 @@ from infranode.normalization.mappers.gtfs_rt import (
     map_transit_trip,
 )
 from infranode.normalization.mappers.hamburg_verkehrslage import (
-    map_hamburg_verkehrslage,
+    map_hamburg_traffic_situation,
 )
 from infranode.normalization.mappers.hvv_geofox import map_hvv_departures
 from infranode.normalization.mappers.mobilithek_afir import map_eround_charging
@@ -70,16 +75,40 @@ from infranode.normalization.mappers.mobilithek_stadt import (
     map_hannover_road_events,
     map_koeln_lez,
 )
+from infranode.normalization.mappers.rmv import map_rmv_departures
 from infranode.normalization.mappers.vgn import map_vgn_departures
 from infranode.registry import get_city
 from infranode.transit.interpolation import estimate_position
-from infranode.transit.resolver import stops_with_geo_for_trip
+from infranode.transit.resolver import (
+    build_route_name_index,
+    build_trip_headsign_index,
+    stops_with_geo_for_trip,
+)
 from infranode.transit.store import (
     get_trip_update,
+    parent_stop_id,
     read_rt_source,
     trips_for_route,
     trips_for_stop,
 )
+
+
+async def _trips_for_stop_or_parent(redis, stop_id: str, *, namespace: str = ""):
+    """Index-Lookup mit Parent-Fallback (Befund 2026-07-16).
+
+    Exakter Treffer gewinnt; ist der Index fuer die steiggenaue ID leer, wird
+    die Parent-Station (erste drei DELFI-Segmente) probiert. Deckt den Fall ab,
+    dass der Feed nur parent-genaue stus liefert, der Client aber eine Steig-ID
+    aus der statischen DELFI-Liste uebergibt.
+    """
+    trip_ids = await trips_for_stop(redis, stop_id, namespace=namespace)
+    if trip_ids:
+        return trip_ids
+    parent = parent_stop_id(stop_id)
+    if parent:
+        return await trips_for_stop(redis, parent, namespace=namespace)
+    return []
+
 
 router = APIRouter()
 
@@ -132,6 +161,7 @@ async def _live_mobilithek(
     publication: str,
     mapper,
     map_kwargs: dict | None = None,
+    keep_uncoordinated: bool = False,
 ) -> dict:
     """Gemeinsame Köln-Live-Route gegen den Mobilithek-mTLS-Pull (LIVE-06/07).
 
@@ -180,6 +210,7 @@ async def _live_mobilithek(
             lat=entry.geo.lat,
             lon=entry.geo.lon,
             publication=publication,
+            keep_uncoordinated=keep_uncoordinated,
         )
 
     raw, status = await client.fetch(source, key, fetch_fn)
@@ -257,7 +288,7 @@ async def live_traffic_flow(city: str, request: Request) -> dict:
     )
 
 
-@router.get("/{city}/baustellen")
+@router.get("/{city}/roadworks")
 async def live_baustellen(city: str, request: Request) -> dict:
     """Live-Baustellen je Stadt (SituationPublication, LIVE-07 / DATA-31).
 
@@ -266,6 +297,9 @@ async def live_baustellen(city: str, request: Request) -> dict:
     (Attribution trägergenau). Eine nicht verdrahtete Stadt -> 200
     ``source_status="disabled"`` (kein Abo). SituationPublication ->
     RoadEventPayload. KEIN Archiv (reine Live-Daten, T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/{city}/baustellen`` bleibt als deprecated Alias
+    erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     if city == "bremen":
@@ -274,47 +308,68 @@ async def live_baustellen(city: str, request: Request) -> dict:
         return await _live_mobilithek(
             city=city,
             request=request,
-            source=SourceId.BREMEN_BAUSTELLEN.value,
-            abo_id=settings.bremen_baustellen_abo_id,
+            source=SourceId.BREMEN_ROADWORKS.value,
+            abo_id=settings.bremen_roadworks_abo_id,
             publication="situation",
             mapper=map_bremen_road_events,
         )
-    abo_id = settings.koeln_baustellen_live_abo_id or _KOELN_BAUSTELLEN_ABO_ID
+    abo_id = settings.koeln_roadworks_live_abo_id or _KOELN_BAUSTELLEN_ABO_ID
     return await _live_mobilithek(
         city=city,
         request=request,
-        source=SourceId.KOELN_BAUSTELLEN_LIVE.value,
+        source=SourceId.KOELN_ROADWORKS_LIVE.value,
         abo_id=abo_id,
         publication="situation",
         mapper=map_koeln_road_events,
-        map_kwargs={"source": SourceId.KOELN_BAUSTELLEN_LIVE},
+        map_kwargs={"source": SourceId.KOELN_ROADWORKS_LIVE},
     )
 
 
-@router.get("/{city}/ereignisse")
+@router.get("/{city}/baustellen", deprecated=True)
+async def live_baustellen_deprecated(
+    city: str, request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist /live/{city}/roadworks."""
+    cities._mark_deprecated(response, "/api/v1/live/{city}/roadworks")
+    return await live_baustellen(city, request)
+
+
+@router.get("/{city}/incidents")
 async def live_ereignisse(city: str, request: Request) -> dict:
     """Live-Verkehrsereignisse je Stadt (Köln SituationPublication, LIVE-07).
 
     Köln Verkehrsinformationen/Ereignisse. Die Abo-ID wird vom Owner aus dem
-    Portal nachgetragen (Settings-Allowlist ``koeln_ereignisse_live_abo_id``);
+    Portal nachgetragen (Settings-Allowlist ``koeln_incidents_live_abo_id``);
     bis dahin liefert die Route ehrlich ``disabled`` (kein Default-Abo, CONTEXT
     "noch testen"). SituationPublication -> RoadEventPayload. KEIN Archiv
     (reine Live-Daten, T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/{city}/ereignisse`` bleibt als deprecated Alias
+    erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     return await _live_mobilithek(
         city=city,
         request=request,
-        source=SourceId.KOELN_EREIGNISSE_LIVE.value,
-        abo_id=settings.koeln_ereignisse_live_abo_id,
+        source=SourceId.KOELN_INCIDENTS_LIVE.value,
+        abo_id=settings.koeln_incidents_live_abo_id,
         publication="situation",
         mapper=map_koeln_road_events,
-        map_kwargs={"source": SourceId.KOELN_EREIGNISSE_LIVE},
+        map_kwargs={"source": SourceId.KOELN_INCIDENTS_LIVE},
     )
 
 
-@router.get("/berlin/verkehrsmeldungen")
-async def live_berlin_verkehrsmeldungen(request: Request) -> dict:
+@router.get("/{city}/ereignisse", deprecated=True)
+async def live_ereignisse_deprecated(
+    city: str, request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist /live/{city}/incidents."""
+    cities._mark_deprecated(response, "/api/v1/live/{city}/incidents")
+    return await live_ereignisse(city, request)
+
+
+@router.get("/berlin/traffic-reports")
+async def live_berlin_traffic_reports(request: Request) -> dict:
     """Live-Verkehrsmeldungen Berlin (SenMVKU SituationPublication, LIVE-08).
 
     Reine V2-SituationPublication-Quelle über denselben Plan-04-Parser
@@ -323,20 +378,33 @@ async def live_berlin_verkehrsmeldungen(request: Request) -> dict:
     ist Berlin-spezifisch. Stadt-Slug fix ``berlin`` (Quelle deckt nur Berlin ab).
     Abo-ID aus der Settings-Allowlist (SSRF, T-20-SSRF). KEIN Archiv (reine
     Live-Daten, T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/berlin/verkehrsmeldungen`` bleibt als deprecated
+    Alias erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     return await _live_mobilithek(
         city="berlin",
         request=request,
-        source=SourceId.BERLIN_VERKEHRSMELDUNGEN.value,
-        abo_id=settings.berlin_verkehrsmeldungen_abo_id,
+        source=SourceId.BERLIN_TRAFFIC_REPORTS.value,
+        abo_id=settings.berlin_traffic_reports_abo_id,
         publication="situation",
         mapper=map_berlin_traffic_messages,
     )
 
 
-@router.get("/hannover/verkehrsmeldungen")
-async def live_hannover_verkehrsmeldungen(request: Request) -> dict:
+@router.get("/berlin/verkehrsmeldungen", deprecated=True)
+async def live_berlin_traffic_reports_deprecated(
+    request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist
+    /live/berlin/traffic-reports."""
+    cities._mark_deprecated(response, "/api/v1/live/berlin/traffic-reports")
+    return await live_berlin_traffic_reports(request)
+
+
+@router.get("/hannover/traffic-reports")
+async def live_hannover_traffic_reports(request: Request) -> dict:
     """Live-Verkehrsmeldungen Hannover (LH Hannover SituationPublication, DATEX II V2).
 
     Reine V2-SituationPublication-Quelle (Baustellen, verkehrsrelevante
@@ -348,19 +416,32 @@ async def live_hannover_verkehrsmeldungen(request: Request) -> dict:
     der Settings-Allowlist (SSRF, T-20-SSRF). Lizenz DL-DE/BY 2.0 (Tier A,
     Mobilithek-Angebot "freie Nutzung/Open Data", analog Bremen), Attribution
     "Landeshauptstadt Hannover". KEIN Archiv (reine Live-Daten, T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/hannover/verkehrsmeldungen`` bleibt als deprecated
+    Alias erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     return await _live_mobilithek(
         city="hannover",
         request=request,
-        source=SourceId.HANNOVER_VERKEHRSMELDUNGEN.value,
-        abo_id=settings.hannover_verkehrsmeldungen_abo_id,
+        source=SourceId.HANNOVER_TRAFFIC_REPORTS.value,
+        abo_id=settings.hannover_traffic_reports_abo_id,
         publication="situation",
         mapper=map_hannover_road_events,
     )
 
 
-@router.get("/koeln/umweltzone")
+@router.get("/hannover/verkehrsmeldungen", deprecated=True)
+async def live_hannover_traffic_reports_deprecated(
+    request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist
+    /live/hannover/traffic-reports."""
+    cities._mark_deprecated(response, "/api/v1/live/hannover/traffic-reports")
+    return await live_hannover_traffic_reports(request)
+
+
+@router.get("/koeln/low-emission-zone")
 async def live_koeln_umweltzone(request: Request) -> dict:
     """Live-LowEmissionZone Köln (MoCKiii SituationPublication, LIVE-12).
 
@@ -368,6 +449,9 @@ async def live_koeln_umweltzone(request: Request) -> dict:
     Plan-04-Parser + ``_live_mobilithek``; nur der Mapper (``map_koeln_lez``) ist
     LEZ-spezifisch. Stadt-Slug fix ``koeln``. Abo-ID aus der Settings-Allowlist
     (SSRF, T-20-SSRF). KEIN Archiv (reine Live-Daten, T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/koeln/umweltzone`` bleibt als deprecated Alias
+    erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     return await _live_mobilithek(
@@ -377,7 +461,18 @@ async def live_koeln_umweltzone(request: Request) -> dict:
         abo_id=settings.koeln_lez_live_abo_id,
         publication="situation",
         mapper=map_koeln_lez,
+        keep_uncoordinated=True,
     )
+
+
+@router.get("/koeln/umweltzone", deprecated=True)
+async def live_koeln_umweltzone_deprecated(
+    request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist
+    /live/koeln/low-emission-zone."""
+    cities._mark_deprecated(response, "/api/v1/live/koeln/low-emission-zone")
+    return await live_koeln_umweltzone(request)
 
 
 @router.get("/dortmund/parking", deprecated=True)
@@ -457,8 +552,8 @@ async def live_dortmund_parking(request: Request, response: Response) -> dict:
     }
 
 
-@router.get("/kiel/zaehlstellen")
-async def live_kiel_zaehlstellen(request: Request) -> dict:
+@router.get("/kiel/counting-stations")
+async def live_kiel_counting_stations(request: Request) -> dict:
     """Live-Zähldaten Kiel (MIV-/Radzaehlstellen, MeasuredDataPublication, LIVE-10).
 
     Kiel Dauerzählstellen über den MeasuredData-Zweig aus Plan 04
@@ -467,16 +562,29 @@ async def live_kiel_zaehlstellen(request: Request) -> dict:
     die ``measurements`` als ``counts``. Stadt-Slug fix ``kiel``. Abo-ID aus der
     Settings-Allowlist (SSRF, T-20-SSRF). KEIN Archiv (reine Live-Daten,
     T-20-ARCHIVE).
+
+    Der alte deutsche Pfad ``/kiel/zaehlstellen`` bleibt als deprecated Alias
+    erhalten (englische Slugs, kein Breaking Change).
     """
     settings = Settings()
     return await _live_mobilithek(
         city="kiel",
         request=request,
-        source=SourceId.KIEL_ZAEHLSTELLEN.value,
-        abo_id=settings.kiel_zaehlstellen_abo_id,
+        source=SourceId.KIEL_COUNTING_STATIONS.value,
+        abo_id=settings.kiel_counting_stations_abo_id,
         publication="measured",
         mapper=map_kiel_counts,
     )
+
+
+@router.get("/kiel/zaehlstellen", deprecated=True)
+async def live_kiel_counting_stations_deprecated(
+    request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist
+    /live/kiel/counting-stations."""
+    cities._mark_deprecated(response, "/api/v1/live/kiel/counting-stations")
+    return await live_kiel_counting_stations(request)
 
 
 @router.get("/eround/charging")
@@ -926,6 +1034,104 @@ async def live_hamburg_departures(
     }
 
 
+# Kadenz der RMV-HAPI-Live-Abfahrten (minutenfrisch).
+_RMV_REFRESH_SECONDS = 60
+
+
+@router.get("/frankfurt-am-main/departures")
+async def live_frankfurt_departures(
+    request: Request, station: str = "Frankfurt (Main) Hauptbahnhof"
+) -> dict:
+    """Live-ÖPNV-Abfahrten Frankfurt/Rhein-Main je Station (RMV-HAPI, Tier C).
+
+    Echtzeit-Abfahrtstafel inkl. Verspätung aus der RMV-HAPI (HAFAS-ReST,
+    www.rmv.de/hapi). Stadt fix ``frankfurt-am-main`` (RMV deckt den Rhein-Main-
+    Raum ab). Der Query-Parameter ``station`` ist ein Stationsname (Default
+    Hauptbahnhof), den der Adapter via ``location.name`` auf die HAFAS-Station-ID
+    auflöst.
+
+    Graceful Degradation: Toggle aus ODER fehlender accessId -> 200
+    ``source_status="disabled"`` (nie 5xx). Unbekannte Station / keine Abfahrten
+    -> 200 ``source_status="no_data"``. Toter Upstream ohne Cache -> 503 mit
+    selbst-korrigierendem Hint. KEIN Archiv (Tier C live-only, T-20-ARCHIVE):
+    der accessId gelangt NIE in Cache-Key (nur der Stationsname) / Response / Log.
+    """
+    entry = get_city("frankfurt-am-main")
+    settings = Settings()
+    # disabled: Toggle aus ODER kein accessId (Graceful Degradation, analog HVV).
+    # Ein leergesetzter Env-Wert wird zu SecretStr("") (nicht None) -> auch der
+    # leere accessId zählt als "nicht gesetzt", sonst liefe der Live-Request ins
+    # Leere und würfe 503 statt ehrlich zu deaktivieren.
+    if (
+        not settings.enable_rmv
+        or settings.rmv_access_id is None
+        or not settings.rmv_access_id.get_secret_value()
+    ):
+        return {
+            "data": None,
+            "meta": _live_meta(
+                source_status="disabled",
+                refresh_seconds=_RMV_REFRESH_SECONDS,
+            ),
+        }
+
+    name = (station or "").strip()[:100]
+    if not name:
+        raise ValidationFailedError(
+            "Parameter 'station' erforderlich.",
+            hint="Einen RMV-Stationsnamen angeben, z. B. station=Hauptbahnhof.",
+        )
+
+    client = request.app.state.resilient_client
+    # Cache-Key trägt NUR den Stationsnamen (T-RMV-02): nie den accessId.
+    cache_key = build_cache_key("rmv", city_slug=entry.slug, params={"station": name})
+    access_id = settings.rmv_access_id.get_secret_value()
+
+    async def fetch_fn():
+        return await fetch_rmv_departures(
+            request.app.state.http,
+            slug=entry.slug,
+            station=name,
+            access_id=access_id,
+            now=datetime.now(UTC),
+        )
+
+    raw, status = await client.fetch("rmv", cache_key, fetch_fn)
+
+    # Toter Upstream ohne Cache -> 503 mit selbst-korrigierendem Hint (DX-06).
+    if raw is None:
+        raise UpstreamError(
+            "Live-Quelle 'rmv' voruebergehend nicht erreichbar, kein "
+            "gecachter Wert vorhanden.",
+            hint="Erneut versuchen oder GET /api/v1/health für Quellen-Status.",
+        )
+
+    # Unbekannte Station oder keine Abfahrten -> ehrliches no_data (200) OHNE Mapper.
+    if not raw.get("departures"):
+        return {
+            "data": None,
+            "meta": _live_meta(
+                source_status="no_data",
+                cache_status=status,
+                refresh_seconds=_RMV_REFRESH_SECONDS,
+            ),
+        }
+
+    record = map_rmv_departures(
+        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
+    )
+    # KEIN Archiv-Write (Tier C live-only, T-20-ARCHIVE)! Nur Redis-Cache.
+    return {
+        "data": record.model_dump(mode="json"),
+        "meta": _live_meta(
+            source_status="ok",
+            cache_status=status,
+            as_of=record.observed_at.isoformat() if record.observed_at else None,
+            refresh_seconds=_RMV_REFRESH_SECONDS,
+        ),
+    }
+
+
 # --- Transit-Live-Routen (GTFS-RT, Phase 19, Tier B) -------------------------
 #
 # Der Request-Pfad liest NUR aus Redis (transit.store): der Hintergrund-Poller
@@ -964,10 +1170,20 @@ def _stop_time_update_for(update: dict, stop_id: str) -> dict | None:
     """Findet das stop_time_update eines Updates, das ``stop_id`` bedient.
 
     Audit-Fix M-1: damit die Live-Abfahrt eine haltgenaue Abfahrtszeit und
-    Sequenz tragen kann. Kein Treffer -> ``None`` (ehrlich, kein Fehler).
+    Sequenz tragen kann. Befund 2026-07-16: Feed und Clients mischen Parent-
+    und Steig-Ebene (Abfrage ``de:05315:11201`` vs. stu ``de:05315:11201:7:74``
+    und umgekehrt) -> nach dem Exakt-Treffer faellt die Suche auf einen
+    Praefix-Vergleich in beide Richtungen zurueck (Segmentgrenze ``:``, damit
+    ``de:09162:5`` nicht ``de:09162:50...`` trifft). Kein Treffer -> ``None``
+    (ehrlich, kein Fehler).
     """
-    for stu in update.get("stop_time_updates", []) or []:
+    stus = update.get("stop_time_updates", []) or []
+    for stu in stus:
         if stu.get("stop_id") == stop_id:
+            return stu
+    for stu in stus:
+        sid = stu.get("stop_id") or ""
+        if sid.startswith(f"{stop_id}:") or stop_id.startswith(f"{sid}:"):
             return stu
     return None
 
@@ -993,6 +1209,46 @@ def _departure_delay(stu: dict | None, update: dict) -> int | None:
     return update.get("delay")
 
 
+# Modul-Cache fuer die statischen GTFS-Namens-/Ziel-Indizes (Teil B, Paket eqr).
+# Key: (abspath, mtime) -> ein woechentlicher Statik-Refresh (neue mtime) wird
+# automatisch neu gestreamt, aber je Request NICHT erneut. T-eqr-MEM: nur die
+# kleinen routes.txt/trips.txt, NIE stop_times.txt (GB).
+_GTFS_NAME_CACHE: dict[tuple[str, float], tuple[dict[str, str], dict[str, str]]] = {}
+
+
+def _transit_static_name_indices(
+    gtfs_path: str | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Liefert (route_name_index, trip_headsign_index) aus dem statischen GTFS.
+
+    Graceful Degradation (Teil B, Paket 260706-eqr): Pfad None/leer oder Datei
+    fehlt -> leere Indizes (line/headsign bleiben beim Aufrufer null). Faengt der
+    Zip-/Stream-Zugriff eine Exception, wird Teil B komplett uebersprungen (leere
+    Indizes) und die Route bleibt funktionsfaehig (KEIN 500). Ergebnis wird pro
+    (Pfad, mtime) gecacht, damit nicht je Request neu gestreamt wird.
+    """
+    if not gtfs_path:
+        return {}, {}
+    try:
+        stat = os.stat(gtfs_path)
+    except OSError:
+        return {}, {}
+    key = (os.path.abspath(gtfs_path), stat.st_mtime)
+    cached = _GTFS_NAME_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        indices = (
+            build_route_name_index(gtfs_path),
+            build_trip_headsign_index(gtfs_path),
+        )
+    except (OSError, KeyError, ValueError):
+        # Statik nicht lesbar/unvollstaendig -> Teil B ehrlich weglassen.
+        return {}, {}
+    _GTFS_NAME_CACHE[key] = indices
+    return indices
+
+
 @router.get("/{city}/transit/departures")
 async def live_transit_departures(
     city: str, request: Request, stop_id: str | None = None
@@ -1003,10 +1259,32 @@ async def live_transit_departures(
     ``get_trip_update``. Leere Liste -> ``no_data``. ``stop_id`` muss dem
     DELFI-Muster ``de:<digits>:...`` entsprechen (Allowlist, T-19-CACHEPOISON),
     sonst 400. KEIN Archiv (Tier B, T-19-ARCHIVE), KEIN Request-Parse.
+
+    RT-only-Semantik (Paket 260706-ry0, gelockert 2026-07-16): ausgeliefert
+    werden ausschliesslich Trips mit Echtzeit-Update; Fahrplan-Sollzeiten sind
+    NICHT enthalten. Traegt ein Update eine absolute Abfahrtszeit (z.B. VBB),
+    wird sie auf Zukunft geprueft (90-s-Grace fuer "gerade abgefahren") und
+    aufsteigend sortiert. Delay-only-Updates ohne absolute Zeit (Regelfall im
+    gtfs.de/DELFI-Feed) werden MIT delay_s/delay_min und departure_time/
+    minutes_until = null ausgeliefert statt verworfen (sonst waere der Endpunkt
+    bundesweit dauerhaft no_data); sie folgen nach den zeitbehafteten Eintraegen.
+    ``meta`` weist zusaetzlich ``raw_updates_total`` und ``filtered_out`` aus
+    (ehrliche Rohzahlen, keine stille Kappung). Fallen dadurch alle Eintraege
+    weg, greift der bestehende ``no_data``-Pfad. Fuer Hamburg gibt es zusaetzlich
+    ``/live/hamburg/departures`` via HVV Geofox.
     """
     entry = get_city(city)
     settings = Settings()
-    if _transit_disabled(settings):
+    # quick-260707-kzd: das disabled-Gate LOKAL in DIESEM Handler ausrechnen (nicht
+    # global in _transit_disabled, damit trip/route-status unveraendert bleiben). Die
+    # Route gilt als aktiv, wenn der bundesweite GTFS-RT-Toggle an ist ODER (fuer
+    # Berlin) der keylose VBB-Toggle. So leuchten Berliner Abfahrten schon bei
+    # enable_vbb=true auf, ohne enable_gtfs_rt.
+    is_berlin = entry.slug == "berlin"
+    route_active = getattr(settings, "enable_gtfs_rt", False) or (
+        is_berlin and getattr(settings, "enable_vbb", False)
+    )
+    if not route_active:
         return {
             "data": None,
             "meta": _live_meta(
@@ -1019,33 +1297,114 @@ async def live_transit_departures(
             "Ungueltige oder fehlende stop_id.",
             hint=(
                 "Erwartet wird eine Halt-ID im DELFI-Muster 'de:<AGS>:<id>' "
-                "oder eine numerische gtfs.de-Halt-ID."
+                "oder eine numerische gtfs.de-Halt-ID; gueltige IDs liefert "
+                "GET /api/v1/cities/{slug}/transit (Feld stop_id). Haeufige "
+                "Verwechslung: die stop_id aus /stations/{eva}/departures bzw. "
+                "/cities/{slug}/station-departures bezeichnet EINEN HALT EINER "
+                "ZUGFAHRT (z. B. '-1203677609210685804-2607251113-13') und ist "
+                "hier keine gueltige Haltestellen-ID."
             ),
         )
 
+    # now_epoch VERBINDLICH die Request-Zeit im Handler (nicht im Mapper), fuer
+    # minutes_until (Teil A). datetime.now(UTC) NUR hier.
+    now_epoch = int(datetime.now(UTC).timestamp())
+
     redis = request.app.state.redis
-    trip_ids = await trips_for_stop(redis, stop_id)
+    # quick-260707-kzd: fuer Berlin zuerst den isolierten VBB-Keyspace probieren.
+    # Kennt er den Halt (>=1 trip_id), wird der komplette Abfahrts-Aufbau daraus
+    # bedient (used_ns="vbb:"); sonst Fallback auf den Default-Keyspace (heutiges
+    # Verhalten). Nicht-Berlin fragt den VBB-Keyspace GAR NICHT ab (keine Regression).
+    used_ns = ""
+    trip_ids: list[str] = []
+    if is_berlin:
+        trip_ids = await _trips_for_stop_or_parent(redis, stop_id, namespace="vbb:")
+        if trip_ids:
+            used_ns = "vbb:"
+    if not trip_ids:
+        trip_ids = await _trips_for_stop_or_parent(redis, stop_id)
+
+    # Teil B (Paket 260706-eqr): lesbaren Linienname/Ziel aus statischem GTFS
+    # aufloesen, falls verfuegbar. Nur die kleinen routes.txt/trips.txt (T-eqr-MEM),
+    # gecacht je (Pfad, mtime); fehlendes/kaputtes GTFS -> leere Indizes (graceful).
+    # Bei VBB-Auslieferung bevorzugt die VBB-Statik (eigener ID-Raum), sonst der
+    # bestehende delfi/gtfs_rt-Statik-Pfad.
+    if used_ns == "vbb:":
+        gtfs_path = getattr(settings, "vbb_gtfs_static_path", None)
+    else:
+        gtfs_path = getattr(settings, "delfi_gtfs_path", None) or getattr(
+            settings, "gtfs_rt_static_path", None
+        )
+    route_name_index, trip_headsign_index = _transit_static_name_indices(gtfs_path)
+
     departures: list[dict] = []
     for tid in trip_ids:
-        update = await get_trip_update(redis, tid)
+        update = await get_trip_update(redis, tid, namespace=used_ns)
         if update is None:
             continue
         # Audit-Fix M-1: das zu DIESEM Halt passende stop_time_update suchen, um
         # die Abfahrt mit departure_time/stop_sequence (und dem haltgenauen Delay)
         # auszuliefern statt nur trip_id/route_id/delay_s.
         stu = _stop_time_update_for(update, stop_id)
+        route_id = update.get("route_id")
+        delay_s = _departure_delay(stu, update)
+        departure_time = stu.get("departure_time") if stu else None
+
+        # Teil A (Paket 260706-eqr): vorhandene Rohwerte EHRLICH aufbereiten. Bei
+        # 0/None -> null (kein erfundener Zeitwert, CLAUDE.md). minutes_until nur,
+        # wenn eine echte absolute epoch-Zeit (>0) vorliegt.
+        departure_time_iso: str | None = None
+        minutes_until: int | None = None
+        if isinstance(departure_time, int) and departure_time > 0:
+            departure_time_iso = datetime.fromtimestamp(departure_time, UTC).isoformat()
+            minutes_until = round((departure_time - now_epoch) / 60)
+        delay_min = round(delay_s / 60) if delay_s is not None else None
+
         departures.append(
             {
                 "trip_id": tid,
-                "route_id": update.get("route_id"),
+                "route_id": route_id,
                 # Audit-Fix K6: haltgenaue Verspätung aus dem stop_time_update
                 # bevorzugen (departure, sonst arrival), sonst die effektive
                 # Fahrt-Verspätung delay_s; tu.delay nur als letzter Fallback.
-                "delay_s": _departure_delay(stu, update),
-                "departure_time": stu.get("departure_time") if stu else None,
+                "delay_s": delay_s,
+                "departure_time": departure_time,
                 "stop_sequence": stu.get("stop_sequence") if stu else None,
+                # Teil A: lesbare Abfahrtszeit + Verspaetung in Minuten.
+                "departure_time_iso": departure_time_iso,
+                "minutes_until": minutes_until,
+                "delay_min": delay_min,
+                # Teil B: Linienname/Ziel aus statischem GTFS (sonst null).
+                "route_short_name": route_name_index.get(route_id)
+                if route_id
+                else None,
+                "trip_headsign": trip_headsign_index.get(tid),
             }
         )
+
+    # Paket 260706-ry0, gelockert 2026-07-16: Der bundesweite gtfs.de/DELFI-Feed
+    # liefert fast ausschliesslich Delay-only-stus (live gemessen: 1 von 400 mit
+    # absoluter Zeit) -> der alte Nur-mit-Absolutzeit-Filter warf ALLES weg und
+    # der Endpunkt war de facto tot (dauerhaft no_data). Neu: Eintraege MIT
+    # absoluter Zeit werden weiter auf Zukunft (90-s-Grace) geprueft; Eintraege
+    # OHNE Zeit bleiben erhalten, wenn sie wenigstens eine Echtzeit-Verspaetung
+    # tragen (delay_s), und liefern minutes_until/departure_time ehrlich als
+    # null. Erst zeitbehaftete Abfahrten aufsteigend, dann Delay-only in stabiler
+    # Reihenfolge. Rohzahlen weiter ehrlich in meta (kein stiller Verlust).
+    raw_updates_total = len(departures)
+    departures = [
+        d
+        for d in departures
+        if (
+            d["departure_time_iso"] is not None
+            and d["departure_time"] >= now_epoch - 90
+        )
+        or (d["departure_time_iso"] is None and d["delay_s"] is not None)
+    ]
+    filtered_out = raw_updates_total - len(departures)
+    departures.sort(
+        key=lambda d: (d["departure_time_iso"] is None, d["departure_time"] or 0)
+    )
 
     if not departures:
         return {
@@ -1056,22 +1415,31 @@ async def live_transit_departures(
             ),
         }
 
+    # quick-260707-kzd: Provenance/Attribution aus dem TATSAECHLICH gelesenen
+    # Keyspace (used_ns). Bei VBB traegt der Record VBB-CC-BY-4.0 (Tier A), sonst
+    # unveraendert gtfs.de/DELFI-CC-BY-SA (Tier B), die Lizenzwahl macht der Mapper.
+    used_source = await read_rt_source(redis, namespace=used_ns)
     record = map_transit_departures(
         {"stop_id": stop_id, "departures": departures},
         retrieved_at=datetime.now(UTC),
         city_slug=entry.slug,
         ags=entry.ags,
         wikidata_qid=entry.qid,
-        source_attribution=attribution_for_source(await read_rt_source(redis)),
+        source_attribution=attribution_for_source(used_source),
+        used_source=used_source,
     )
     # KEIN Archiv-Write für reine Live-Daten (T-19-ARCHIVE, Tier B)! Nur Redis.
+    meta = _live_meta(
+        source_status="ok",
+        as_of=record.observed_at.isoformat() if record.observed_at else None,
+        refresh_seconds=_TRANSIT_REFRESH_SECONDS,
+    )
+    # Additiv (wie as_of/refresh_seconds): ehrliche Rohzahlen, keine stille Kappung.
+    meta["raw_updates_total"] = raw_updates_total
+    meta["filtered_out"] = filtered_out
     return {
         "data": record.model_dump(mode="json"),
-        "meta": _live_meta(
-            source_status="ok",
-            as_of=record.observed_at.isoformat() if record.observed_at else None,
-            refresh_seconds=_TRANSIT_REFRESH_SECONDS,
-        ),
+        "meta": meta,
     }
 
 
@@ -1139,14 +1507,15 @@ async def live_transit_trip(city: str, trip_id: str, request: Request) -> dict:
             )
             if stops:
                 unresolved = False
+                # Audit-Fix K6: effektive Verspätung delay_s (aus
+                # stop_time_update) statt der praktisch nie gesetzten
+                # Trip-Ebene tu.delay; Fallback auf 0.
+                delay_s_val = update.get("delay_s")
+                if delay_s_val is None:
+                    delay_s_val = update.get("delay") or 0
                 estimated_position = estimate_position(
                     stops,
-                    # Audit-Fix K6: effektive Verspätung delay_s (aus
-                    # stop_time_update) statt der praktisch nie gesetzten
-                    # Trip-Ebene tu.delay; Fallback auf 0.
-                    delay_s=update.get("delay_s")
-                    if update.get("delay_s") is not None
-                    else (update.get("delay") or 0),
+                    delay_s=delay_s_val,
                     now_epoch=now_epoch,
                 )
         except (OSError, KeyError, ValueError):
@@ -1395,27 +1764,30 @@ async def live_nuernberg_departures(request: Request, stop_id: str = "510") -> d
 _VERKEHRSLAGE_REFRESH_SECONDS = 300
 
 
-@router.get("/hamburg/verkehrslage")
-async def live_hamburg_verkehrslage(request: Request) -> dict:
+@router.get("/hamburg/traffic-situation")
+async def live_hamburg_traffic_situation(request: Request) -> dict:
     """Live-Verkehrslage Hamburg (DATA-26, Tier A, DIREKT keylos).
 
     Direkter, keyloser Zugang zur Echtzeit-Verkehrslage der Freien und Hansestadt
-    Hamburg über die OGC API Features (``adapters/hamburg_verkehrslage``) statt
+    Hamburg über die OGC API Features (``adapters/hamburg_traffic_situation``) statt
     Mobilithek-mTLS: KEIN Cert, KEIN Abo (Owner-Strategie, direkte Anbieter-API).
     Die Antwort trägt eine Netz-Zusammenfassung (``summary.total`` +
     ``by_state``-Zählung je Zustandsklasse) und die priorisierte, gedeckelte Liste
     der nicht-fließenden Straßenabschnitte (``measurements``). Stadt fix
     ``hamburg`` (Quelle deckt nur den Stadtraum ab).
 
-    Graceful Degradation: Toggle ``enable_hamburg_verkehrslage`` aus -> 200
+    Graceful Degradation: Toggle ``enable_hamburg_traffic_situation`` aus -> 200
     ``source_status="disabled"`` (nie 5xx). Resilienter Fetch über die Fassade;
     leerer Feed (``summary.total`` == 0) -> ``no_data``; toter Upstream ohne Cache
     -> 503 mit selbst-korrigierendem Hint. Lizenz DL-DE/BY 2.0 (Tier A). KEIN
     Archiv (reine Live-Daten, T-26-ARCHIVE) - nur Redis-Cache über die Fassade.
+
+    Der alte deutsche Pfad ``/hamburg/verkehrslage`` bleibt als deprecated Alias
+    erhalten (englische Slugs, kein Breaking Change).
     """
     entry = get_city("hamburg")
     settings = Settings()
-    if not settings.enable_hamburg_verkehrslage:
+    if not settings.enable_hamburg_traffic_situation:
         return {
             "data": None,
             "meta": _live_meta(
@@ -1425,16 +1797,16 @@ async def live_hamburg_verkehrslage(request: Request) -> dict:
         }
 
     client = request.app.state.resilient_client
-    key = build_cache_key("hamburg_verkehrslage", city_slug=entry.slug)
+    key = build_cache_key("hamburg_traffic_situation", city_slug=entry.slug)
 
     async def fetch_fn():
-        return await fetch_hamburg_verkehrslage(request.app.state.http)
+        return await fetch_hamburg_traffic_situation(request.app.state.http)
 
-    raw, status = await client.fetch("hamburg_verkehrslage", key, fetch_fn)
+    raw, status = await client.fetch("hamburg_traffic_situation", key, fetch_fn)
 
     if raw is None:
         raise UpstreamError(
-            "Live-Quelle 'hamburg_verkehrslage' voruebergehend nicht erreichbar, "
+            "Live-Quelle 'hamburg_traffic_situation' voruebergehend nicht erreichbar, "
             "kein gecachter Wert vorhanden.",
             hint="Erneut versuchen oder GET /api/v1/health für Quellen-Status.",
         )
@@ -1453,7 +1825,7 @@ async def live_hamburg_verkehrslage(request: Request) -> dict:
             ),
         }
 
-    record = map_hamburg_verkehrslage(
+    record = map_hamburg_traffic_situation(
         raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
     )
     observed = (
@@ -1466,5 +1838,183 @@ async def live_hamburg_verkehrslage(request: Request) -> dict:
             cache_status=status,
             as_of=observed,
             refresh_seconds=_VERKEHRSLAGE_REFRESH_SECONDS,
+        ),
+    }
+
+
+@router.get("/hamburg/verkehrslage", deprecated=True)
+async def live_hamburg_traffic_situation_deprecated(
+    request: Request, response: Response
+) -> dict:
+    """DEPRECATED Alias (englische Slugs): Nachfolger ist
+    /live/hamburg/traffic-situation."""
+    cities._mark_deprecated(response, "/api/v1/live/hamburg/traffic-situation")
+    return await live_hamburg_traffic_situation(request)
+
+
+# --- EFA-Verbund-Live-Abfahrten (generischer Mentz-EFA-Adapter, Tier C) --------
+#
+# Kadenz der EFA-Live-Abfahrten (minutenfrisch), gemeinsam fuer alle Verbunde.
+_EFA_REFRESH_SECONDS = 60
+# Hosts HARTKODIERT (SSRF-Invarianten T-p9c-01 / T-73a-01): der Aufrufer uebergibt
+# diese Modul-Konstanten als base_url an den generischen EFA-Adapter, der NIE einen
+# Host aus User-Input baut.
+_VRR_EFA_BASE = "https://efa.vrr.de/vrr"
+_VRR_ATTRIBUTION = "Verkehrsverbund Rhein-Ruhr (VRR)"
+_VVS_EFA_BASE = "https://www3.vvs.de/vvs"
+_VVS_ATTRIBUTION = "Verkehrs- und Tarifverbund Stuttgart (VVS)"
+
+
+class _EfaVerbund(NamedTuple):
+    """Ein EFA-Verbund-Eintrag: Host + Scoping + Quelle + Attribution + Toggle."""
+
+    base_url: str
+    ags5: str
+    source: SourceId
+    attribution: str
+    enable_attr: str
+
+
+# Slug -> EFA-Verbund. Der ags5-Wert ist das AGS5-Praefix (de:<AGS5>:) fuers
+# Stadt-Scoping der StopFinder-Antwort; die Keys sind zugleich die Allowlist der
+# vom generischen Handler bedienten Staedte (verifiziert gegen registry/cities.py
+# ags[:5]). Sechs VRR-Kernstaedte + VVS Stuttgart teilen sich EINEN Handler und
+# EINEN Adapter/Mapper; nur base_url/source/attribution/Toggle unterscheiden sich.
+_EFA_VERBUNDE: dict[str, _EfaVerbund] = {
+    "duesseldorf": _EfaVerbund(
+        _VRR_EFA_BASE, "05111", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "dortmund": _EfaVerbund(
+        _VRR_EFA_BASE, "05913", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "essen": _EfaVerbund(
+        _VRR_EFA_BASE, "05113", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "duisburg": _EfaVerbund(
+        _VRR_EFA_BASE, "05112", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "bochum": _EfaVerbund(
+        _VRR_EFA_BASE, "05911", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "wuppertal": _EfaVerbund(
+        _VRR_EFA_BASE, "05124", SourceId.VRR, _VRR_ATTRIBUTION, "enable_vrr"
+    ),
+    "stuttgart": _EfaVerbund(
+        _VVS_EFA_BASE, "08111", SourceId.VVS, _VVS_ATTRIBUTION, "enable_vvs"
+    ),
+}
+
+
+@router.get("/{slug}/departures")
+async def live_efa_departures(
+    slug: str, request: Request, station: str | None = None
+) -> dict:
+    """Live-OePNV-Abfahrten der EFA-Verbunde je Station (Mentz-EFA, Tier C).
+
+    Echtzeit-Abfahrtstafel inkl. Verspaetung aus keylosen Mentz-EFA-Instanzen
+    (rapidJSON). Bedient die sechs VRR-Kernstaedte (duesseldorf, dortmund, essen,
+    duisburg, bochum, wuppertal) UND VVS Stuttgart ueber EINE Verbund-Registry
+    ``_EFA_VERBUNDE``: der Query-Parameter ``station`` ist ein Stationsname
+    (Default Hauptbahnhof der Stadt), den der Adapter via StopFinder auf die
+    EFA-Global-Id aufloest (Stadt-Scoping ueber das AGS5-Praefix). Der generische
+    EFA-Adapter/Mapper ist ueber base_url/source/attribution parametrisiert;
+    weitere Verbunde stecken kuenftig nur als Registry-Zeile hier ein.
+
+    WICHTIG (Routing): Dieser Route-Param-Handler ist NACH allen literalen
+    ``.../departures``-Routen (hamburg/frankfurt-am-main/nuernberg) registriert,
+    damit er diese nicht beschattet.
+
+    Graceful Degradation: unbekannter (Nicht-EFA-)Slug -> 404. Toggle aus -> 200
+    ``source_status="disabled"`` (nie 5xx). Unbekannte Station / keine Abfahrten
+    -> 200 ``source_status="no_data"``. Toter Upstream ohne Cache -> 503 mit
+    selbst-korrigierendem Hint. Tier C live-only, Lizenz UNKNOWN, KEIN Archiv
+    (T-73a-ARCHIVE); keylos, daher keine Credentials. Der Cache-Key traegt nur
+    Stadt + Stationsname; der Namespace folgt der Quelle (vrr/vvs) und haelt das
+    VRR-Cache-Verhalten unveraendert.
+    """
+    row = _EFA_VERBUNDE.get(slug)
+    if row is None:
+        raise NotFoundError(
+            f"Unbekannte Live-Abfahrtstafel '{slug}'.",
+            hint=(
+                "Diese Route bedient die EFA-Verbund-Staedte: "
+                + ", ".join(sorted(_EFA_VERBUNDE))
+                + ". Andere Staedte haben eigene Boards (z. B. "
+                "/live/hamburg/departures, /live/nuernberg/departures)."
+            ),
+        )
+
+    entry = get_city(slug)
+    settings = Settings()
+    if not getattr(settings, row.enable_attr):
+        return {
+            "data": None,
+            "meta": _live_meta(
+                source_status="disabled",
+                refresh_seconds=_EFA_REFRESH_SECONDS,
+            ),
+        }
+
+    name = (station or f"{entry.name_de} Hbf").strip()[:100]
+    if not name:
+        raise ValidationFailedError(
+            "Parameter 'station' erforderlich.",
+            hint="Einen Stationsnamen angeben, z. B. station=Hauptbahnhof.",
+        )
+
+    source_ns = row.source.value
+    client = request.app.state.resilient_client
+    cache_key = build_cache_key(
+        source_ns, city_slug=entry.slug, params={"station": name}
+    )
+
+    async def fetch_fn():
+        return await fetch_efa_departures(
+            request.app.state.http,
+            base_url=row.base_url,
+            city_slug=entry.slug,
+            ags5=row.ags5,
+            station=name,
+            now=datetime.now(UTC),
+        )
+
+    raw, status = await client.fetch(source_ns, cache_key, fetch_fn)
+
+    # Toter Upstream ohne Cache -> 503 mit selbst-korrigierendem Hint (DX-06).
+    if raw is None:
+        raise UpstreamError(
+            f"Live-Quelle '{source_ns}' voruebergehend nicht erreichbar, kein "
+            "gecachter Wert vorhanden.",
+            hint="Erneut versuchen oder GET /api/v1/health für Quellen-Status.",
+        )
+
+    # Unbekannte Station oder keine Abfahrten -> ehrliches no_data (200) OHNE Mapper.
+    if not raw.get("departures"):
+        return {
+            "data": None,
+            "meta": _live_meta(
+                source_status="no_data",
+                cache_status=status,
+                refresh_seconds=_EFA_REFRESH_SECONDS,
+            ),
+        }
+
+    record = map_efa_departures(
+        raw,
+        retrieved_at=datetime.now(UTC),
+        source=row.source,
+        attribution=row.attribution,
+        ags=entry.ags,
+        wikidata_qid=entry.qid,
+        city_slug=entry.slug,
+    )
+    # KEIN Archiv-Write (Tier C live-only, T-73a-ARCHIVE)! Nur Redis-Cache.
+    return {
+        "data": record.model_dump(mode="json"),
+        "meta": _live_meta(
+            source_status="ok",
+            cache_status=status,
+            as_of=record.observed_at.isoformat() if record.observed_at else None,
+            refresh_seconds=_EFA_REFRESH_SECONDS,
         ),
     }

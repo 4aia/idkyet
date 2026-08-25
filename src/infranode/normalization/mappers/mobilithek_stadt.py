@@ -4,10 +4,10 @@
 (SituationPublication, ``events``) deterministisch in einen ``CanonicalRecord``:
 - ``map_berlin_traffic_messages``: Berlin Verkehrsmeldungen (SenMVKU,
   SituationPublication) -> ``RoadEventPayload`` (``city_source="berlin_senmvku"``),
-  SourceId.BERLIN_VERKEHRSMELDUNGEN (LIVE-08).
+  SourceId.BERLIN_TRAFFIC_REPORTS (LIVE-08).
 - ``map_hannover_road_events``: Hannover Verkehrsmeldungen (LH Hannover, Fachbereich
   Tiefbau, SituationPublication) -> ``RoadEventPayload`` (``city_source="hannover"``),
-  SourceId.HANNOVER_VERKEHRSMELDUNGEN, Attribution "Landeshauptstadt Hannover".
+  SourceId.HANNOVER_TRAFFIC_REPORTS, Attribution "Landeshauptstadt Hannover".
 - ``map_koeln_lez``: Köln LowEmissionZone (MoCKiii, SituationPublication) ->
   ``RoadEventPayload`` (``city_source="koeln"``), SourceId.KOELN_LEZ_LIVE (LIVE-12).
 
@@ -80,7 +80,7 @@ def map_berlin_traffic_messages(
         geo=None,
         observed_at=_parse_as_of(raw),
         retrieved_at=retrieved_at,
-        source=SourceId.BERLIN_VERKEHRSMELDUNGEN,
+        source=SourceId.BERLIN_TRAFFIC_REPORTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -119,7 +119,7 @@ def map_hannover_road_events(
         geo=None,
         observed_at=_parse_as_of(raw),
         retrieved_at=retrieved_at,
-        source=SourceId.HANNOVER_VERKEHRSMELDUNGEN,
+        source=SourceId.HANNOVER_TRAFFIC_REPORTS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,

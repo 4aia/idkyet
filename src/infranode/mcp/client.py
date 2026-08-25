@@ -29,6 +29,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from infranode.config import get_settings
+from infranode.mcp.schemas import ToolEnvelope
 
 # Default-Base-URL der lokalen Live-API (Loopback). Aus der Env überschreibbar,
 # aber nur auf einen allowlisteten Host (siehe ALLOWED_HOSTS).
@@ -54,6 +55,36 @@ ALLOWED_HOSTS: frozenset[str] = frozenset(
 # löst einen ntfy-Push aus (Owner-Wunsch: MCP-Aktionen verfolgen). Best-effort-
 # Kennung, kein Auth-Mechanismus.
 _MCP_SOURCE_HEADER = "X-Infranode-Mcp"
+
+# Echte Client-IP des eingehenden MCP-Requests (aus der ContextVar in
+# mcp/clientip.py). Faehrt als eigener Header mit, damit der ntfy-Push je
+# Tool-Aufruf den Absender zeigt (Owner-Wunsch 2026-07-16). Best-effort-
+# Kennung wie _MCP_SOURCE_HEADER, kein Auth-Mechanismus.
+_MCP_CLIENT_HEADER = "X-Infranode-Mcp-Client"
+
+# Default-Seiten-Limit fuer MCP-Listen-Aufrufe (quick-260706-g9q). Der REST-Layer
+# liefert direktem REST (kein GPT-Header) seit g9q wieder die VOLLE Datenart-Liste;
+# der MCP-Kanal bindet sich stattdessen HIER selbst, indem er bei Listen-Aufrufen ein
+# explizites ``limit`` an die Query haengt (der REST-Layer sieht dann ein normales
+# numerisches Limit und braucht keine MCP-Erkennung). Bewusst als String hartkodiert
+# und gespiegelt zu ``api.v1.pagination.DEFAULT_LIMIT`` (50), um keinen FastAPI-lastigen
+# Import von ``api.v1.pagination`` in den schlanken MCP-Client zu ziehen.
+_MCP_DEFAULT_LIMIT = "50"
+
+
+def _with_default_limit(params: dict[str, str] | None) -> dict[str, str]:
+    """Reichert Listen-Aufruf-Params um das MCP-Default-``limit`` an (nicht mutierend).
+
+    Setzt ``limit=_MCP_DEFAULT_LIMIT`` nur, wenn der Caller WEDER ``limit`` NOCH
+    ``all`` vorgibt (dann bleibt seine Wahl unangetastet: ein explizites limit oder
+    der kanalunabhaengige ``all``-Vollausgabe-Override gewinnen). Gibt ein neues dict
+    zurueck, das Eingabe-``params`` wird nicht veraendert.
+    """
+    merged = dict(params or {})
+    if "limit" not in merged and "all" not in merged:
+        merged["limit"] = _MCP_DEFAULT_LIMIT
+    return merged
+
 
 # T-12-MCP-INJECT: erlaubte Ressourcen-Namen, exakt die City-Sub-Ressourcen aus
 # docs/openapi.yaml (GET /api/v1/cities/{slug}/<resource>). Roher Tool-Input wird
@@ -95,7 +126,6 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         "election",
         "holidays",
         "health",
-        "icu-live",
         "road-events",
         "events",
         "webcams",
@@ -124,6 +154,21 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         "solar-roofs",
         # DATA-32: INKAR/BBSR sozialökonomische Indikatoren je Kreis (Tier A).
         "indicators",
+        # Wegweiser Kommune (Bertelsmann Stiftung, CC0): SDG-/Nachhaltigkeits-
+        # Indikatoren je Gemeinde als ZEITREIHE 2006-2023 (Tier A). Ergänzt
+        # "indicators", das je Kennzahl nur den jüngsten Wert trägt.
+        "sustainability",
+        # Die übrigen Wegweiser-Datenarten, alle als Zeitreihe, alle über
+        # ?from=/?to= auf ein Jahresfenster eingrenzbar.
+        "population-structure",
+        "population-trend",
+        "municipal-finance",
+        "labour-market",
+        "integration",
+        "childcare",
+        "education-stats",
+        "social-situation",
+        "care",
         # DATA-35: BORIS amtliche Bodenrichtwerte je Stadt, aggregiert (Tier A).
         "land-values",
         # DATA-37: Regionalstatistik.de Realsteuer-Hebesätze (Gemeinde) +
@@ -168,6 +213,16 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         # Quick-260705-jgt: Behoerden-Wartezeiten je Stadt (live, keylos, Tier A,
         # Teilabdeckung nur koeln). Ueber get_city_resource(slug, "office-wait-times").
         "office-wait-times",
+        # Quick-260708-tsv: kommunale Ratsinformationen (OParl "Paper") je Stadt,
+        # keylos, Tier A, Teilabdeckung (dresden/koeln/duesseldorf/muenster/leipzig).
+        # Ueber get_city_resource(slug, "council-papers").
+        "council-papers",
+        # Quick-260729-muc: ruhender Verkehr je Stadt (keylos, Tier A,
+        # Teilabdeckung nur muenchen). Ueber get_city_resource(slug, "...").
+        "parking-onstreet",
+        "park-and-ride",
+        "mobility-points",
+        "bike-parking",
     }
 )
 
@@ -206,7 +261,7 @@ _LOOPBACK_CONNECT_TIMEOUT = 2.0
 _LOOPBACK_WRITE_TIMEOUT = 5.0
 
 
-def _loopback_limits(settings) -> httpx.Limits:  # noqa: ANN001 - Settings-Duck-Typing
+def _loopback_limits(settings) -> httpx.Limits:
     """Baut die httpx.Limits des Loopback-Clients aus den Settings.
 
     Reine Werte-Abbildung (quick-260704-ust). max_connections/max_keepalive
@@ -219,7 +274,7 @@ def _loopback_limits(settings) -> httpx.Limits:  # noqa: ANN001 - Settings-Duck-
     )
 
 
-def _loopback_timeout(settings) -> httpx.Timeout:  # noqa: ANN001 - Settings-Duck-Typing
+def _loopback_timeout(settings) -> httpx.Timeout:
     """Baut das httpx.Timeout des Loopback-Clients aus den Settings.
 
     Der KURZE ``pool``-Wert (Default 1.0s) ist die eigentliche Verteidigung: ein
@@ -332,7 +387,7 @@ async def get_resource(
     slug: str,
     resource: str,
     params: dict[str, str] | None = None,
-) -> dict:
+) -> ToolEnvelope:
     """Ruft eine Stadt-Ressource der lokalen Live-API und gibt das JSON zurück.
 
     Baut die URL ausschließlich aus der allowlisteten Base-URL plus dem festen
@@ -359,14 +414,20 @@ async def get_resource(
         )
     safe_slug = _validate_slug(slug)
     # MCP-Kennung: der Ressourcen-Name (bereits gegen ALLOWED_RESOURCES validiert).
-    return await _request(f"/cities/{safe_slug}/{resource}", params, tag=resource)
+    # Listen-Aufrufe binden sich hier selbst per Default-limit (g9q), es sei denn der
+    # Caller setzt limit/all; ein nicht-paginierter Endpunkt ignoriert das limit.
+    return await _request(
+        f"/cities/{safe_slug}/{resource}",
+        _with_default_limit(params),
+        tag=resource,
+    )
 
 
 async def get_live(
     slug: str,
     live_resource: str,
     params: dict[str, str] | None = None,
-) -> dict:
+) -> ToolEnvelope:
     """Ruft eine Live-Ressource ``/live/{slug}/{live_resource}``; gibt JSON zurück.
 
     ``live_resource`` wird gegen ``ALLOWED_LIVE_RESOURCES`` geprüft, ``slug`` als
@@ -393,7 +454,7 @@ async def get_live(
 async def get_collection(
     name: str,
     params: dict[str, str] | None = None,
-) -> dict:
+) -> ToolEnvelope:
     """Ruft einen slug-losen Collection-Endpunkt ``/{name}`` und gibt das JSON zurück.
 
     ``name`` wird gegen ``ALLOWED_COLLECTIONS`` geprüft und der Base-Host gegen
@@ -415,7 +476,7 @@ async def get_collection(
 _EVA_RE = re.compile(r"^\d{6,8}$")
 
 
-async def get_station_board(eva: str, board: str) -> dict:
+async def get_station_board(eva: str, board: str) -> ToolEnvelope:
     """Ruft ein Per-Bahnhof-Board ``/stations/{eva}/{board}`` und gibt das JSON zurück.
 
     ``eva`` wird strikt als 6-8-stellige Zahl validiert (T-12-MCP-SSRF/-INJECT),
@@ -445,7 +506,7 @@ async def _request(
     params: dict[str, str] | None,
     *,
     tag: str,
-) -> dict:
+) -> ToolEnvelope:
     """Fuehrt den Loopback-GET gegen die allowlistete Base-URL aus (gemeinsamer Kern).
 
     ``path`` wird ausschließlich aus bereits validierten Bestandteilen gebaut
@@ -456,6 +517,13 @@ async def _request(
     base = _base_url()
     url = f"{base}{path}"
     headers = {_MCP_SOURCE_HEADER: tag}
+    # Client-IP des laufenden MCP-Requests mitgeben (None im stdio-Betrieb).
+    # Lazy-Import haelt den stdio-Pfad frei von Starlette.
+    from infranode.mcp.clientip import current_client_ip
+
+    ip = current_client_ip.get()
+    if ip:
+        headers[_MCP_CLIENT_HEADER] = ip
 
     response = await _get_client().get(url, params=params, headers=headers)
     # Bei 4xx/5xx den strukturierten API-Fehler-Envelope als lesbare

@@ -12,6 +12,7 @@ SMARD.de" (muss verbatim in DATA-LICENSES.md + SOURCE_LICENSE stehen).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from infranode.normalization import (
     Attribution,
@@ -30,7 +31,7 @@ def map_smard(
     slug: str,
     raw: dict,
     *,
-    measure: str,
+    measure: Literal["load", "price"],
     unit: str,
     retrieved_at: datetime,
     ags: str | None = None,

@@ -154,18 +154,39 @@ fi
 # set_cache_settings + respect_origin: Cloudflare cached /api/v1/* am Edge und
 # folgt dem Origin-Cache-Control (max-age/s-maxage/swr). serve_stale aktiv lassen,
 # damit stale-while-revalidate am Edge wirkt.
+#
+# ZWEITE Regel (GPT-Bypass, cache:false): GPT-Actions-Traffic wird NICHT am Edge
+# gecached. Grund: die App liefert fuer GPT-Requests eine kanal-gebundene
+# 50er-Variante mit Cache-Control no-store (parse_page_params seit PR #35). Ohne
+# Edge-Bypass wuerde Cloudflare je nach erstem Requester die falsche Variante
+# unter derselben URL ausspielen: entweder bekaeme REST die gekappte 50er-Antwort
+# (stiller Breaking Change fuer Bulk-Puller) oder GPT die MB-grosse Vollantwort
+# (Actions-Groessenlimit ~100 KB gerissen). Cache-Poisoning in beide Richtungen.
+# Bei Cloudflare-Cache-Rules gewinnt die SPAETERE Regel bei Konflikt, daher steht
+# der GPT-Bypass NACH der allgemeinen Cache-Regel. Header-Namen in der
+# Rules-Sprache IMMER lowercase.
 CACHE_BODY="$(jq -n '{
-  rules: [{
-    action: "set_cache_settings",
-    description: "InfraNode: API-JSON am Edge cachen, Origin-Cache-Control respektieren",
-    expression: "(starts_with(http.request.uri.path, \"/api/v1/\"))",
-    action_parameters: {
-      cache: true,
-      edge_ttl: { mode: "respect_origin" },
-      browser_ttl: { mode: "respect_origin" },
-      serve_stale: { disable_stale_while_updating: false }
+  rules: [
+    {
+      action: "set_cache_settings",
+      description: "InfraNode: API-JSON am Edge cachen, Origin-Cache-Control respektieren",
+      expression: "(starts_with(http.request.uri.path, \"/api/v1/\"))",
+      action_parameters: {
+        cache: true,
+        edge_ttl: { mode: "respect_origin" },
+        browser_ttl: { mode: "respect_origin" },
+        serve_stale: { disable_stale_while_updating: false }
+      }
+    },
+    {
+      action: "set_cache_settings",
+      description: "InfraNode: GPT-Actions-Traffic NICHT am Edge cachen (kanal-gebundene Antworten, Cache-Poisoning in beide Richtungen vermeiden)",
+      expression: "(starts_with(http.request.uri.path, \"/api/v1/\")) and ((lower(http.user_agent) contains \"chatgpt-user\") or (len(http.request.headers[\"openai-gpt-id\"]) > 0) or (len(http.request.headers[\"openai-ephemeral-user-id\"]) > 0) or (len(http.request.headers[\"openai-conversation-id\"]) > 0))",
+      action_parameters: {
+        cache: false
+      }
     }
-  }]
+  ]
 }')"
 
 if [[ "$DRY_RUN" == "1" ]]; then

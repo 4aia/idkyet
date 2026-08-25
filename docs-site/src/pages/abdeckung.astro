@@ -57,12 +57,52 @@ const PARTIAL = [
     note: "",
   },
   {
+    key: "council-papers",
+    label: "Ratsinformationen",
+    path: "/api/v1/cities/{slug}/council-papers",
+    op: "getCityCouncilPapers",
+    reason: "lizenzgeklärte OParl-Endpunkte je Stadt (5 Städte)",
+    note: "",
+  },
+  {
     key: "parking",
     label: "Parkhaus-Belegung",
     path: "/api/v1/cities/{slug}/parking",
     op: "getCityParking",
-    reason: "ParkenDD-Live (13 lizenzverifizierte Städte) + München statischer Katalog",
+    reason: "Direktquellen je Stadt (Stadt-OpenData, MobiData BW, Mobilithek) + DB BahnPark statischer Katalog (14 Städte bundesweit, DL-DE/BY, Tier A)",
+    note: "DB-BahnPark-Städte liefern einen statischen Katalog ohne numerische Live-Belegung (free=null). Einzelne Städte mit eingefrorenem Ursprung antworten ehrlich mit no_data, bis der Ursprung wieder liefert.",
+  },
+  {
+    key: "parking-onstreet",
+    label: "Straßenparkraum",
+    path: "/api/v1/cities/{slug}/parking-onstreet",
+    op: "getCityParkingOnstreet",
+    reason: "kommunale Parkraum-Fachdaten je Stadt (nur München)",
+    note: "Stammdaten ohne Belegung: Stellplätze und Parkregelung je Straßenabschnitt, aggregiert je Regelung, Straße und Parkraummanagementgebiet.",
+  },
+  {
+    key: "park-and-ride",
+    label: "P+R- und B+R-Anlagen",
+    path: "/api/v1/cities/{slug}/park-and-ride",
+    op: "getCityParkAndRide",
+    reason: "kommunale P+R-Betreiberdaten je Stadt (nur München)",
+    note: "Die Belegung ist eine Prognose aus historischen Erfahrungswerten, keine Echtzeit-Belegung.",
+  },
+  {
+    key: "mobility-points",
+    label: "Mobilitätspunkte",
+    path: "/api/v1/cities/{slug}/mobility-points",
+    op: "getCityMobilityPoints",
+    reason: "kommunale Mobilitätspunkt-Fachdaten je Stadt (nur München)",
     note: "",
+  },
+  {
+    key: "bike-parking",
+    label: "Radparken",
+    path: "/api/v1/cities/{slug}/bike-parking",
+    op: "getCityBikeParking",
+    reason: "kommunale Radparkraum-Fachdaten je Stadt (nur München)",
+    note: "Gezählt wird nur der Bestand. Geplante, abgebaute und außer Betrieb genommene Anlagen stehen als eigene Zahlen daneben.",
   },
   {
     key: "bike-counts",
@@ -211,6 +251,27 @@ const partialMap: Record<string, string[]> = coverage.partial;
       Stationsname über <code>?station=</code>. Tier C live-only.
     </li>
     <li>
+      <a href="/api/getLiveFrankfurtDepartures/"><strong>RMV-Abfahrten (Frankfurt)</strong></a>
+      (<code>/api/v1/live/frankfurt-am-main/departures</code>): Echtzeit-Abfahrtstafel
+      je Rhein-Main-Station aus der RMV-HAPI (HAFAS-ReST), inklusive Verspätung.
+      Nur Frankfurt/Rhein-Main (RMV-Raum), Stationsname über <code>?station=</code>.
+      Tier C live-only.
+    </li>
+    <li>
+      <a href="/api/getLiveVrrDepartures/"><strong>VRR-Abfahrten (Rhein-Ruhr)</strong></a>
+      (<code>/api/v1/live/{"{slug}"}/departures</code>): Echtzeit-Abfahrtstafel je
+      Station aus der keylosen Mentz-EFA (efa.vrr.de), inklusive Verspätung.
+      Für die sechs VRR-Kernstädte Düsseldorf, Dortmund, Essen, Duisburg, Bochum
+      und Wuppertal; Stationsname über <code>?station=</code>. Tier C live-only.
+    </li>
+    <li>
+      <a href="/api/getLiveVrrDepartures/"><strong>VVS-Abfahrten (Stuttgart)</strong></a>
+      (<code>/api/v1/live/stuttgart/departures</code>): Echtzeit-Abfahrtstafel je
+      Station aus der keylosen Mentz-EFA (www3.vvs.de), inklusive Verspätung.
+      Für Stuttgart (VVS), zweite EFA-Instanz über denselben generischen Adapter;
+      Stationsname über <code>?station=</code>. Tier C live-only.
+    </li>
+    <li>
       <a href="/api/getCityStationDepartures/"><strong>Bahnhof-Abfahrten je Stadt</strong></a>
       und <a href="/api/getCityStationArrivals/"><strong>-Ankünfte</strong></a>
       (<code>/api/v1/cities/{"{slug}"}/station-departures</code> bzw.
@@ -300,11 +361,11 @@ const partialMap: Record<string, string[]> = coverage.partial;
     text-decoration: none;
     padding: 0.55rem 1.1rem;
     border-radius: 6px;
-    background: var(--color-accent);
-    color: #fff;
+    background: var(--color-accent-strong);
+    color: var(--on-accent);
   }
   .status-card__btn:hover {
-    background: var(--color-accent-strong);
+    background: var(--color-accent);
   }
   table.cov {
     width: 100%;
@@ -362,9 +423,9 @@ const partialMap: Record<string, string[]> = coverage.partial;
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #9a5b00;
-    background: #fbf3e2;
-    border: 1px solid #ecd9b0;
+    color: var(--warn-fg);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
     border-radius: 3px;
     padding: 0.05rem 0.4rem;
     vertical-align: middle;

@@ -52,7 +52,7 @@ def map_bremen_road_events(
     """Bildet Bremen-Baustellen (situation) auf einen ``CanonicalRecord`` ab (Tier A).
 
     Die ``events`` (Baustellen/Arbeitsstellen, BBox-gefiltert um Bremen) wandern in
-    den ``RoadEventPayload`` (``city_source="bremen_baustellen"``). ``observed_at``
+    den ``RoadEventPayload`` (``city_source="bremen_roadworks"``). ``observed_at``
     aus der DATEX-II ``publicationTime`` (``as_of``) falls vorhanden.
     ``retrieved_at`` injiziert (keine Systemuhr im Mapper).
     """
@@ -61,7 +61,7 @@ def map_bremen_road_events(
         geo=None,
         observed_at=_parse_as_of(raw),
         retrieved_at=retrieved_at,
-        source=SourceId.BREMEN_BAUSTELLEN,
+        source=SourceId.BREMEN_ROADWORKS,
         license_id=LicenseId.DL_DE_BY_2_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -71,7 +71,7 @@ def map_bremen_road_events(
             license_url=_DL_DE_BY_URL,
         ),
         payload=RoadEventPayload(
-            city_source="bremen_baustellen",
+            city_source="bremen_roadworks",
             events=raw.get("events", []),
         ),
     )

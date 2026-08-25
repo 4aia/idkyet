@@ -115,7 +115,7 @@ def _pick_nearest(features: list[dict], lat: float, lon: float) -> dict | None:
 
 def _epoch_ms_to_date(value: object) -> str | None:
     """Wandelt ein ArcGIS-Epoch-ms-Feld defensiv in ein ISO-Datum (YYYY-MM-DD)."""
-    if value is None:
+    if value is None or not isinstance(value, (int, float, str)):
         return None
     try:
         return datetime.fromtimestamp(int(value) / 1000, UTC).date().isoformat()

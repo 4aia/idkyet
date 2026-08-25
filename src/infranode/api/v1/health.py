@@ -33,20 +33,20 @@ async def health(request: Request) -> dict:
     return {"status": "ok", "version": __version__, "redis": redis_ok}
 
 
-@router.get("/ping")
+@router.get("/ping", include_in_schema=False)
 async def ping() -> dict:
     """Erzeugt eine JSON-Log-Zeile mit request_id und gibt die ID im meta zurück."""
     log.info("ping_received")
     return {"data": {"pong": True}, "meta": {"correlation_id": correlation_id.get()}}
 
 
-@router.get("/echo")
+@router.get("/echo", include_in_schema=False)
 async def echo(n: int) -> dict:
     """Echo eines int-Query; nicht-int löst RequestValidationError -> 400 aus."""
     return {"data": {"n": n}, "meta": {"correlation_id": correlation_id.get()}}
 
 
-@router.get("/_boom")
+@router.get("/_boom", include_in_schema=False)
 async def boom() -> dict:
     """Walking-Skeleton: beweist die einheitliche Error-Envelope (503)."""
     raise UpstreamError(

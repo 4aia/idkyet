@@ -472,7 +472,7 @@ async def fetch_traffic(
 ) -> dict:
     """Holt Baustellen + Verkehrswarnungen je kuratierter Autobahn der Stadt.
 
-    Fragt ``_CITY_ROADS.get(slug, ())`` × ``("roadworks", "warning")`` NEBENLÄUFIG
+    Fragt ``_CITY_ROADS.get(slug, ())`` x ``("roadworks", "warning")`` NEBENLÄUFIG
     ab (Semaphore-bound) und filtert per Bounding-Box um (``lat``, ``lon``). Eine
     einzelne kranke Autobahn fällt tolerant weg; nur ein Totalausfall schlägt als
     ``httpx.HTTPError`` an die Fassade durch.
@@ -492,7 +492,7 @@ async def fetch_traffic(
         )
         _raise_if_all_failed(results)
         for (_road, service), result in zip(pairs, results, strict=True):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 continue
             filtered = _bbox_items(result, lat, lon, radius_km)
             if service == "roadworks":
@@ -536,7 +536,7 @@ async def fetch_webcams(
         )
         _raise_if_all_failed(results)
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 continue
             cams.extend(_bbox_items(result, lat, lon, radius_km))
 

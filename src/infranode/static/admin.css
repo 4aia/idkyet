@@ -242,6 +242,23 @@ table.logs tbody tr:nth-child(even) {
   background: #fafafa;
 }
 
+/* Breite Tabellen (z.B. Top-IPs im Traffic-Tab: 7 Spalten inkl. langem
+   User-Agent + Pfad) horizontal scrollbar machen. Ohne diesen Wrapper schneidet
+   die .card (overflow: hidden, fuer saubere Ecken) alles rechts ab, das ueber
+   die Kartenbreite hinauslaeuft. Gleiches Muster wie .heatmap-scroll. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* Nur ausgewiesene Langtext-Spalten (User-Agent, Pfad, Endpunkt) umbrechen
+   lassen, damit die Tabelle in die Kartenbreite passt. NICHT global auf td:
+   overflow-wrap auf allen Zellen laesst der Auto-Table-Algorithmus auch kurze
+   Spalten (IP, Zaehler) mitten im Wert brechen. Der overflow-x-Wrapper bleibt
+   Fallback fuer sehr schmale Viewports. */
+table.logs td.wrap {
+  overflow-wrap: anywhere;
+}
+
 .status-2xx {
   color: var(--ok);
 }
@@ -356,6 +373,34 @@ table.logs.source-health {
 .tab[aria-current="page"] {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+/* Zeitfenster-Umschalter im Traffic-Tab (Stunde/Heute/Monat): segmentierte
+   Links, aktiver in Akzentfarbe gefuellt. */
+.window-switch {
+  display: flex;
+  gap: var(--xs);
+  margin-bottom: var(--lg);
+}
+
+.window-opt {
+  padding: var(--xs) var(--md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.window-opt:hover {
+  color: var(--text);
+}
+
+.window-opt.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 /* --- Phase 17: Heatmap (UI-SPEC §2/§4.2) --------------------------------- */

@@ -75,16 +75,131 @@ def _is_blocked(item: dict) -> bool:
     return str(item.get("isBlocked")).strip().lower() == "true"
 
 
-def _slim_event(item: dict) -> dict:
-    """Gibt ein NEUES dict ohne die Ballast-Felder zurueck (reine Funktion).
+def _to_float(value: object) -> float | None:
+    """Zahl als float, sonst None (rein). Der Feed liefert Zahlen als String."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
 
-    Entfernt ausschliesslich die Schluessel aus ``_BALLAST_FIELDS`` (Denylist); alle
-    uebrigen Felder werden byte-identisch uebernommen, insbesondere die Stau-
-    Anreicherung ``congestion`` (nicht in der Denylist) und unbekannte Zusatzfelder.
-    Das Eingabe-dict wird NICHT mutiert. Es werden nur Felder weggelassen, keine
-    Werte umgeschrieben.
+
+def _bbox_and_center(
+    extent: object,
+) -> tuple[list[float] | None, float | None, float | None]:
+    """Zerlegt das Autobahn-``extent`` in bbox + Mittelpunkt (rein).
+
+    Der Feed liefert die Ausdehnung als Komma-String
+    ``"lat1,lon1,lat2,lon2"``, also BREITE zuerst [VERIFIED 2026-07-25 an der
+    Live-Antwort fuer Koeln: "51.0153...,6.9231...,51.0316...,6.9556..."]. Die
+    ausgegebene ``bbox`` folgt dagegen der GeoJSON-Konvention
+    ``[min_lon, min_lat, max_lon, max_lat]``, damit sie ohne Ruecksprache
+    weiterverarbeitet werden kann; ``lat``/``lon`` sind der Mittelpunkt, damit
+    ein Ereignis wie in allen anderen Datenarten kartierbar ist. Unbrauchbares
+    Extent -> (None, None, None).
     """
-    return {k: v for k, v in item.items() if k not in _BALLAST_FIELDS}
+    if not isinstance(extent, str):
+        return None, None, None
+    parts = [_to_float(p) for p in extent.split(",")]
+    if len(parts) != 4:
+        return None, None, None
+    floats = [p for p in parts if p is not None]
+    if len(floats) != 4:
+        return None, None, None
+    lat1, lon1, lat2, lon2 = floats
+    min_lon, max_lon = sorted((lon1, lon2))
+    min_lat, max_lat = sorted((lat1, lat2))
+    # Auf 6 Nachkommastellen runden (~11 cm): der Mittelwert erzeugt sonst
+    # Fliesskomma-Rauschen wie 6.8218499999999995 in der Antwort.
+    return (
+        [min_lon, min_lat, max_lon, max_lat],
+        round((lat1 + lat2) / 2, 6),
+        round((lon1 + lon2) / 2, 6),
+    )
+
+
+def _canonical_event_fields(item: dict) -> dict:
+    """Kanonische snake_case-Felder zu einem Autobahn-Event (rein, additiv).
+
+    Der Autobahn-Feed ist die einzige Quelle mit camelCase-Namen und Zahlen/
+    Booleans als String (``isBlocked: "false"``). Damit dieser Endpunkt dieselbe
+    Sprache spricht wie der Rest der API, kommen die Werte zusaetzlich als
+    ``is_blocked`` (bool), ``start_timestamp``, ``delay_minutes`` (int),
+    ``average_speed_kmh`` (float), ``abnormal_traffic_type``, ``name``,
+    ``description_text`` sowie ``bbox``/``lat``/``lon`` dazu (Konsistenz-Audit
+    2026-07-25). Die Rohfelder bleiben abgekuendigt daneben stehen; es wird nur
+    umbenannt und typisiert, nie ein Wert erfunden.
+    """
+    out: dict = {"is_blocked": _is_blocked(item)}
+
+    start = item.get("startTimestamp")
+    if start is not None:
+        out["start_timestamp"] = start
+
+    delay = _to_float(item.get("delayTimeValue"))
+    if delay is not None:
+        out["delay_minutes"] = int(delay)
+
+    speed = _to_float(item.get("averageSpeed"))
+    if speed is not None:
+        out["average_speed_kmh"] = speed
+
+    raw_type = item.get("abnormalTrafficType")
+    if isinstance(raw_type, str) and raw_type.strip():
+        out["abnormal_traffic_type"] = raw_type.strip().upper()
+
+    title = item.get("title")
+    if isinstance(title, str) and title.strip():
+        out["name"] = title.strip()
+
+    # ``description`` ist im Feed eine Zeilenliste; als Fliesstext ist sie mit den
+    # String-Beschreibungen der uebrigen Datenarten vergleichbar.
+    desc = item.get("description")
+    if isinstance(desc, list):
+        lines = [
+            line.strip() for line in desc if isinstance(line, str) and line.strip()
+        ]
+        if lines:
+            out["description_text"] = " ".join(lines)
+    elif isinstance(desc, str) and desc.strip():
+        out["description_text"] = desc.strip()
+
+    bbox, lat, lon = _bbox_and_center(item.get("extent"))
+    if bbox is not None:
+        out["bbox"] = bbox
+        out["lat"] = lat
+        out["lon"] = lon
+    return out
+
+
+def _slim_event(item: dict, *, ballast: frozenset[str] = _BALLAST_FIELDS) -> dict:
+    """Gibt ein NEUES dict ohne die ``ballast``-Felder zurueck (reine Funktion).
+
+    Entfernt ausschliesslich die Schluessel aus ``ballast`` (Denylist, Default
+    ``_BALLAST_FIELDS``); alle uebrigen Felder werden byte-identisch uebernommen,
+    insbesondere die Stau-Anreicherung ``congestion`` (nicht in der Denylist) und
+    unbekannte Zusatzfelder. Das Eingabe-dict wird NICHT mutiert. Es werden nur
+    Felder weggelassen, keine Werte umgeschrieben.
+
+    Der ``ballast``-Parameter erlaubt den ``include=geometry``-Opt-in
+    (quick-260706-g9q): der Aufrufer reicht ``_BALLAST_FIELDS - {"geometry"}``
+    durch, um die Roh-Polyline zu erhalten; alle uebrigen Ballast-Felder bleiben
+    entfernt. Bestandsaufrufe ohne ``ballast`` verhalten sich unveraendert.
+
+    Zusaetzlich kommen die kanonischen snake_case-Felder dazu
+    (``_canonical_event_fields``, Konsistenz-Audit 2026-07-25); vorhandene
+    Rohfelder werden dabei NICHT ueberschrieben.
+    """
+    kept = {k: v for k, v in item.items() if k not in ballast}
+    canonical = {
+        k: v for k, v in _canonical_event_fields(item).items() if k not in kept
+    }
+    return {**kept, **canonical}
 
 
 # DATA-08 Stau-Klassifizierung: ``abnormalTrafficType`` ist das ehrliche Quell-Feld
@@ -115,12 +230,14 @@ def _classify_congestion(warning: dict) -> dict | None:
     if level is None:
         return None
     out: dict = {"level": level, "abnormal_traffic_type": raw_type}
-    try:
-        delay = int(warning.get("delayTimeValue"))
-        if delay > 0:
-            out["delay_minutes"] = delay
-    except (TypeError, ValueError):
-        pass
+    raw_delay = warning.get("delayTimeValue")
+    if isinstance(raw_delay, (int, float, str)):
+        try:
+            delay = int(raw_delay)
+            if delay > 0:
+                out["delay_minutes"] = delay
+        except (TypeError, ValueError):
+            pass
     if _is_blocked(warning):
         out["blocked"] = True
     return out
@@ -165,6 +282,7 @@ def map_autobahn_traffic(
     retrieved_at: datetime,
     ags: str | None = None,
     wikidata_qid: str | None = None,
+    include_geometry: bool = False,
 ) -> CanonicalRecord:
     """Bildet rohe Autobahn-Verkehrsdaten auf einen ``CanonicalRecord`` (Tier A) ab.
 
@@ -193,15 +311,27 @@ def map_autobahn_traffic(
     ~178 Baustellen) nicht unter das GPT-Actions-Limit kommt. Die Kappung wird ehrlich
     ausgewiesen (``roadworks_total``/``roadworks_truncated``), kein stiller Cap.
     ``warnings`` (aktuelle Staus) bleiben ungekappt.
+
+    ``include_geometry`` (quick-260706-g9q): der Feld-Opt-in zur Roh-Polyline
+    (kein Tier-/Paginierungs-Thema). Default ``False`` -> ``geometry`` bleibt wie
+    bisher entfernt (schlanke Response); ``True`` (Route bei ``include=geometry``
+    bzw. ``?full=1``) behaelt ``geometry`` in roadworks UND warnings, entfernt aber
+    weiterhin allen uebrigen Ballast.
     """
-    slimmed_roadworks = [_slim_event(r) for r in raw.get("roadworks", [])]
+    ballast = _BALLAST_FIELDS - {"geometry"} if include_geometry else _BALLAST_FIELDS
+    slimmed_roadworks = [
+        _slim_event(r, ballast=ballast) for r in raw.get("roadworks", [])
+    ]
     roadworks_total = len(slimmed_roadworks)
     # Blockierende Baustellen zuerst (stabile Sortierung erhaelt sonst die
     # Original-Reihenfolge), dann auf _MAX_ROADWORKS kappen.
     ranked_roadworks = sorted(slimmed_roadworks, key=lambda r: not _is_blocked(r))
     roadworks = ranked_roadworks[:_MAX_ROADWORKS]
     roadworks_truncated = roadworks_total > _MAX_ROADWORKS
-    warnings = [_slim_event(w) for w in _enrich_warnings(raw.get("warnings", []))]
+    warnings = [
+        _slim_event(w, ballast=ballast)
+        for w in _enrich_warnings(raw.get("warnings", []))
+    ]
     return CanonicalRecord(
         city_slug=raw["slug"],
         geo=None,

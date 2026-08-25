@@ -53,7 +53,15 @@ export const GET: APIRoute = async ({ site }) => {
       "Jede Antwort folgt dem kanonischen " +
       "Envelope mit data und meta auf Top-Level (source_status, correlation_id " +
       "und cache_status liegen in meta); jeder data-Record trägt zusätzlich ein " +
-      "attribution-Feld mit Lizenz und Herkunft.",
+      "attribution-Feld mit Lizenz und Herkunft. " +
+      "Feldnamen sind durchgängig snake_case und englisch, gleiche Konzepte " +
+      "heißen überall gleich (post_code, street, house_number, place, name, " +
+      "start, end, distance_km, power_kw, lat, lon). post_code ist immer ein " +
+      "fünfstelliger String, Zeitstempel tragen eine Zeitzone, eine fehlende " +
+      "Angabe ist null statt Leerstring. Ältere Doppelnamen (plz, zip, strasse, " +
+      "hausnummer, ort, city, bezeichnung, beginn, ende, art, dist_km, " +
+      "leistung_kw, einheit_typ sowie die camelCase-Rohfelder der " +
+      "Autobahn-Verkehrsmeldungen) tragen denselben Wert, sind aber abgekündigt.",
   );
   lines.push("");
   lines.push(
@@ -71,10 +79,12 @@ export const GET: APIRoute = async ({ site }) => {
   lines.push(`- [Städte](${base}/staedte/): Durchsuchbare Liste aller 84 abgedeckten Großstädte mit Slug, Bundesland, Einwohnern und Abdeckung.`);
   lines.push(`- [Daten-API](${base}/daten/): Daten-API und Datenanalyse-API für deutsche Städte, Hub über alle Datenarten, Datensatz (CSV/Parquet) und MCP-Zugang.`);
   lines.push(`- [Abdeckung & Status](${base}/abdeckung/): Welche Endpunkte für welche Städte Daten liefern (flächendeckend vs. teilabgedeckt: flood, webcams, traffic, road-events), source_status-Werte inkl. not_covered, Live-Status-Page für Störungen.`);
-  lines.push(`- [MCP-Server](${base}/mcp/): Gehosteter MCP-Server unter https://mcp.infranode.dev/mcp (Remote, Streamable HTTP, keylos) mit 12 schlanken Tools für 67 Datenarten inkl. Stadt-Überblick (Katalog aller Datenarten), Echtzeit-Abfahrten, Städte- und Quellenübersicht. Als Connector in Claude/ChatGPT verbinden, keine Installation.`);
-  lines.push(`- [MCP-Server-Vergleich](${base}/mcp-vergleich/): InfraNode sachlich verglichen mit anderen MCP-Servern für deutsche und europäische Daten (germany-mcp-server, db-mcp, mcp-server-public-transport, Einzelstadt-Server): Abdeckung, Datenbreite, ÖPNV-Echtzeit, keylos, hosted. InfraNode ist der breiteste (84 Städte, 67 Datenarten).`);
+  lines.push(`- [MCP-Server](${base}/mcp/): Gehosteter MCP-Server unter https://mcp.infranode.dev/mcp (Remote, Streamable HTTP, keylos) mit 12 schlanken Tools für 82 Datenarten inkl. Stadt-Überblick (Katalog aller Datenarten), Echtzeit-Abfahrten, Städte- und Quellenübersicht. Als Connector in Claude/ChatGPT verbinden, keine Installation.`);
+  lines.push(`- [MCP-Server-Vergleich](${base}/mcp-vergleich/): InfraNode sachlich verglichen mit anderen MCP-Servern für deutsche und europäische Daten (germany-mcp-server, db-mcp, mcp-server-public-transport, Einzelstadt-Server): Abdeckung, Datenbreite, ÖPNV-Echtzeit, keylos, hosted. InfraNode ist der breiteste (84 Städte, 82 Datenarten).`);
   lines.push(`- [ChatGPT & GPT-Actions](${base}/chatgpt/): InfraNode als Custom-GPT-Action: kuratierte Actions-OpenAPI unter https://infranode.dev/actions/openapi.json (23 Operationen, keylos, alle GET), Import per URL im GPT-Editor, empfohlene GPT-Instructions mit Attribution-Pflicht.`);
-  lines.push(`- [Über](${base}/ueber/): Hintergrund zum Projekt, kostenlose Open-Data-API (Quellcode öffentlich auf GitHub, Apache-2.0), Betrieb in Deutschland, Kontakt.`);
+  lines.push(`- [Über](${base}/ueber/): Hintergrund zum Projekt, kostenlose Open-Data-API (Quellcode öffentlich auf GitHub, Apache-2.0), Betrieb in Deutschland und Finnland (EU), Kontakt.`);
+  lines.push(`- [Changelog](${base}/changelog/): Alle für Nutzer sichtbaren Änderungen (neue Datenarten, neue Städte, Verhaltensänderungen, Fehlerbehebungen, Abkündigungen), neueste zuerst, mit RSS-Feed unter ${base}/changelog/feed.xml.`);
+  lines.push(`- [Roadmap](${base}/roadmap/): Geplante und anstehende Änderungen sowie die Stabilitäts- und Ankündigungs-Policy (additiv, Breaking Changes mit Vorlauf angekündigt).`);
   lines.push(`- [Impressum](${base}/impressum/): Anbieterangaben nach DDG.`);
   lines.push(`- [Datenschutz](${base}/datenschutz/): Keine Cookies, kein Tracking, DSGVO-Rechte.`);
   lines.push("");
@@ -85,10 +95,12 @@ export const GET: APIRoute = async ({ site }) => {
   lines.push(`- [Cities](${base}/en/cities/): Searchable list of all 84 covered cities with slug, state, population and coverage.`);
   lines.push(`- [Data API](${base}/en/data/): Data API and data analysis API for German cities, hub over all data types, dataset (CSV/Parquet) and MCP access.`);
   lines.push(`- [Coverage & status](${base}/en/coverage/): Which endpoints serve which cities (fully vs. partially covered: flood, webcams, traffic, road-events), source_status values incl. not_covered, live status page for outages.`);
-  lines.push(`- [MCP server](${base}/en/mcp/): Hosted MCP server at https://mcp.infranode.dev/mcp (remote, Streamable HTTP, key-free) with 12 lean tools covering 67 data types incl. city overview (catalog of all data types), live departures, cities and sources overview. Add as a connector in Claude/ChatGPT, no install.`);
-  lines.push(`- [MCP server comparison](${base}/en/mcp-comparison/): InfraNode compared factually with other MCP servers for German and European data (germany-mcp-server, db-mcp, mcp-server-public-transport, single-city servers): coverage, data breadth, transit realtime, keyless, hosted. InfraNode is the broadest (84 cities, 67 data types).`);
+  lines.push(`- [MCP server](${base}/en/mcp/): Hosted MCP server at https://mcp.infranode.dev/mcp (remote, Streamable HTTP, key-free) with 12 lean tools covering 82 data types incl. city overview (catalog of all data types), live departures, cities and sources overview. Add as a connector in Claude/ChatGPT, no install.`);
+  lines.push(`- [MCP server comparison](${base}/en/mcp-comparison/): InfraNode compared factually with other MCP servers for German and European data (germany-mcp-server, db-mcp, mcp-server-public-transport, single-city servers): coverage, data breadth, transit realtime, keyless, hosted. InfraNode is the broadest (84 cities, 82 data types).`);
   lines.push(`- [ChatGPT & GPT actions](${base}/en/chatgpt/): InfraNode as a Custom GPT action: curated actions OpenAPI at https://infranode.dev/actions/openapi.json (23 operations, keyless, all GET), import via URL in the GPT editor, recommended GPT instructions with attribution requirement.`);
   lines.push(`- [About](${base}/en/about/): Background, free open-data API (source code on GitHub, Apache-2.0), contact.`);
+  lines.push(`- [Changelog](${base}/en/changelog/): All user-visible changes (new data types, new cities, behaviour changes, fixes, deprecations), newest first, with an RSS feed at ${base}/en/changelog/feed.xml.`);
+  lines.push(`- [Roadmap](${base}/en/roadmap/): Planned and upcoming changes plus the stability and announcement policy (additive, breaking changes announced with lead time).`);
   lines.push("");
 
   // Per-Datentyp-Landingpages (REST), DE+EN. Keyword-Einstieg je Datenachse.

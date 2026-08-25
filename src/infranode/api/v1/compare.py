@@ -55,9 +55,9 @@ def _delegated_resources() -> dict:
     Logik-Duplikate). Nur billige Kandidaten sind gelistet: Store-Reads
     (indicators), gecachte Quellen (GENESIS-Regio, DWD-Warnungen: EIN
     bundesweiter Fetch fuer alle Staedte) und der Redis-Join
-    (charging-status). BEWUSST NICHT dabei: fuel-prices (Tankerkoenig-ToS
-    verlangt on-demand ohne Cache, ein 28-Staedte-Fan-out je Request waere
-    ein ToS-/Limit-Risiko).
+    (charging-status). BEWUSST NICHT dabei: fuel-prices (die Tankerkoenig-
+    Bedingungen verlangen Requests on demand und begrenzen auf 1 Request/Minute;
+    ein 28-Staedte-Fan-out je Request waere genau die untersagte Massenabfrage).
 
     Lazy als Funktion statt Modul-Konstante: cities.py importiert beim Laden
     viel Adapter-Geflecht; der lokale Import vermeidet Import-Zyklen ueber
@@ -124,7 +124,7 @@ async def _one(slug: str, request: Request, resource: str) -> dict:
     # die gesamte Vergleichs-Antwort mit 5xx verdirbt.
     try:
         raw, status = await client.fetch(source, key, fetch_fn)
-    except Exception:  # noqa: BLE001 - per-Stadt still degradieren (D-06)
+    except Exception:
         return {"city": entry.slug, "data": None, "source_status": "error"}
 
     # Toter Upstream ohne Cache -> per-Stadt error (KEIN raise, D-06).
@@ -139,7 +139,7 @@ async def _one(slug: str, request: Request, resource: str) -> dict:
         record = mapper(
             raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
         )
-    except Exception:  # noqa: BLE001 - defekter Datensatz einer Stadt -> error (D-06)
+    except Exception:
         return {"city": entry.slug, "data": None, "source_status": "error"}
 
     return {
@@ -173,7 +173,7 @@ async def _one_delegated(slug: str, request: Request, resource: str) -> dict:
     handler = _delegated_resources()[resource]
     try:
         envelope = await handler(entry.slug, request)
-    except Exception:  # noqa: BLE001 - per-Stadt still degradieren (D-06)
+    except Exception:
         return {"city": entry.slug, "data": None, "source_status": "error"}
 
     data = envelope.get("data")

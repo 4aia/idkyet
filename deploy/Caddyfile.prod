@@ -43,6 +43,11 @@
 				name api
 				port 8000
 				refresh 10s
+				# NUR A-Records aufloesen: seit dem IPv6-Egress-Netz (PR #102) liefert
+				# der Docker-DNS auch AAAA, uvicorn lauscht aber nur auf IPv4 ->
+				# AAAA-Dials enden als Connection refused und Caddy antwortet 502
+				# (Vorfall 2026-07-16, intermittierende 502 auf /api/v1 ab 12:55 UTC).
+				versions ipv4
 			}
 			# Correlation-ID durchreichen, damit asgi-correlation-id sie in
 			# FastAPI uebernehmen kann (FND-03).
@@ -132,8 +137,38 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 	# einem MCP-Client und schickt nur den Menschen zur Doku-Seite weiter.
 	@browser {
 		header Accept *text/html*
+		# llms.txt ausnehmen: auch Browser sollen die Klartext-Datei sehen,
+		# nicht auf die Doku-Seite umgeleitet werden.
+		not path /llms.txt
 	}
 	redir @browser https://{$INFRANODE_PUBLIC_DOMAIN}/mcp/ 302
+
+	# Trailing-Slash-Toleranz (Directory-Review 2026-07-10): /mcp/ intern auf
+	# /mcp umschreiben, statt den 307 des Python-Servers durchzureichen.
+	# Anthropics Review meidet Redirects auf Protokoll-Endpunkten; der interne
+	# Rewrite erhaelt Methode und POST-Body, echte Clients ohne Slash sind
+	# unberuehrt.
+	rewrite /mcp/ /mcp
+
+	# llms.txt fuer LLM-Crawler auf der MCP-Subdomain (war 404). Bewusst ohne
+	# Zahlenangaben (Datenarten/Staedte wachsen); kanonische Langfassung liegt
+	# auf der Hauptdomain und wird dort generiert.
+	handle /llms.txt {
+		header Content-Type "text/plain; charset=utf-8"
+		respond <<LLMS
+			# InfraNode MCP Server
+
+			> Remote MCP server (streamable HTTP) for German open data: live and
+			> archived data for the largest German cities, from licensed official
+			> sources with per-record attribution. Keyless and read-only.
+
+			Endpoint: https://mcp.infranode.dev/mcp
+
+			- Documentation: https://infranode.dev/mcp/
+			- Canonical llms.txt (all data types, cities, endpoints): https://infranode.dev/llms.txt
+			- REST API: https://infranode.dev/api/v1
+			LLMS 200
+	}
 
 	# Reine Maschinen-Schnittstelle (JSON-RPC/SSE), keine HTML-Auslieferung -> keine CSP.
 	header {
@@ -149,4 +184,22 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 		# Client es faelschen und sich frische Schutzfenster erschleichen.
 		header_up -X-Forwarded-For
 	}
+}
+
+# Self-hosted ntfy-Server (OPS-NTFY-SELFHOST, Owner-Entscheid 2026-07-16): eigener
+# Ingress fuer den Alarm-Push-Kanal unter ntfy.<domain>, Ersatz fuer die gedrosselte
+# ntfy.sh-Free-Tier. Der ntfy-Service ist nur intern via ntfy:80 erreichbar (KEIN
+# oeffentliches Port-Mapping); Caddy bleibt der EINZIGE Ingress (Gateway-Invariante).
+# Cert via DNS-01 (Cloudflare) wie die anderen Bloecke. ntfy nutzt WebSockets fuer den
+# Live-Nachrichten-Stream; reverse_proxy reicht das Upgrade automatisch durch.
+# NTFY_AUTH_DEFAULT_ACCESS=deny-all haelt den Server ohne angelegten User/Token dicht.
+ntfy.{$INFRANODE_PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	tls {
+		dns cloudflare {env.INFRANODE_CF_DNS_TOKEN}
+		resolvers 1.1.1.1
+	}
+
+	reverse_proxy ntfy:80
 }

@@ -63,17 +63,33 @@ async def fetch_dortmund_road_events(
             continue
         props = feature.get("properties") or {}
         feat_lat, feat_lon = _point_lat_lon(feature.get("geometry"))
+        description = props.get("art_der_baumassnahme")
+        client = props.get("auftraggeber")
+        restriction = props.get("einschrankung")
+        period = props.get("zeitraum")
+        start = props.get("von")
+        end = props.get("bis")
+        district = props.get("stadtbezirk")
         events.append(
             {
-                "beschreibung": props.get("art_der_baumassnahme"),
-                "auftraggeber": props.get("auftraggeber"),
-                "einschraenkung": props.get("einschrankung"),
-                "zeitraum": props.get("zeitraum"),
-                "von": props.get("von"),
-                "bis": props.get("bis"),
-                "stadtbezirk": props.get("stadtbezirk"),
+                # Kanonische englische Namen (Muster koeln_arcgis).
+                "description": description,
+                "client": client,
+                "restriction": restriction,
+                "period": period,
+                "start": start,
+                "end": end,
+                "district": district,
                 "lat": feat_lat,
                 "lon": feat_lon,
+                # Abgekündigt (alte deutsche Namen), Werte identisch:
+                "beschreibung": description,
+                "auftraggeber": client,
+                "einschraenkung": restriction,
+                "zeitraum": period,
+                "von": start,
+                "bis": end,
+                "stadtbezirk": district,
             }
         )
     return {"slug": slug, "events": events}

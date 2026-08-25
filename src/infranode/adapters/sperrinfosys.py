@@ -234,19 +234,39 @@ async def fetch_sperrinfosys_road_events(
             continue
         x, y = _first_coordinate(feature.get("geometry"))
         feat_lat, feat_lon = _to_wgs84(x, y)
+        event_type = props.get("Sperrung_Art_Klartext")
+        closure_type = props.get("Sperrung_Typ_Klartext")
+        reason = props.get("Sperrung_Grund")
+        start = props.get("Sperrung_von")
+        end = props.get("Sperrung_bis")
+        street = props.get("Strasse")
+        road_class = props.get("Strassenklasse")
+        location = props.get("Ortslage")
+        diversion_via = props.get("Umleitung_ueber")
         events.append(
             {
-                "art": props.get("Sperrung_Art_Klartext"),
-                "typ": props.get("Sperrung_Typ_Klartext"),
-                "grund": props.get("Sperrung_Grund"),
-                "von": props.get("Sperrung_von"),
-                "bis": props.get("Sperrung_bis"),
-                "strasse": props.get("Strasse"),
-                "strassenklasse": props.get("Strassenklasse"),
-                "ortslage": props.get("Ortslage"),
-                "umleitung_ueber": props.get("Umleitung_ueber"),
+                # Kanonische englische Namen (Muster koeln_arcgis).
+                "event_type": event_type,
+                "closure_type": closure_type,
+                "reason": reason,
+                "start": start,
+                "end": end,
+                "street": street,
+                "road_class": road_class,
+                "location": location,
+                "diversion_via": diversion_via,
                 "lat": feat_lat,
                 "lon": feat_lon,
+                # Abgekündigt (alte deutsche Namen), Werte identisch:
+                "art": event_type,
+                "typ": closure_type,
+                "grund": reason,
+                "von": start,
+                "bis": end,
+                "strasse": street,
+                "strassenklasse": road_class,
+                "ortslage": location,
+                "umleitung_ueber": diversion_via,
             }
         )
     return {"slug": slug, "events": events}

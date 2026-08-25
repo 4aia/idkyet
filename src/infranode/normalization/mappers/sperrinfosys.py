@@ -31,6 +31,35 @@ from infranode.normalization import (
 
 _DL_DE_BY_URL = "https://www.govdata.de/dl-de/by-2-0"
 
+# Alter deutscher Event-Key -> kanonischer englischer Key (Abkündigung
+# 2026-08-01). Der Adapter dupliziert bereits beim Holen; der Backfill hier
+# schließt die Übergangslücke für Roh-Antworten aus dem Redis-Cache, die vor
+# dem Deploy entstanden sind und nur die deutschen Keys tragen (Muster
+# mappers/tree_cadastre.py). Gesetzt wird nur, wenn der neue Key fehlt.
+_CANONICAL_KEYS: dict[str, str] = {
+    "art": "event_type",
+    "typ": "closure_type",
+    "grund": "reason",
+    "von": "start",
+    "bis": "end",
+    "strasse": "street",
+    "strassenklasse": "road_class",
+    "ortslage": "location",
+    "umleitung_ueber": "diversion_via",
+}
+
+
+def _backfill_events(events: list[dict]) -> list[dict]:
+    """Ergänzt fehlende kanonische Keys aus den abgekündigten deutschen Keys."""
+    result: list[dict] = []
+    for event in events:
+        item = dict(event)
+        for old, new in _CANONICAL_KEYS.items():
+            if new not in item and old in item:
+                item[new] = item[old]
+        result.append(item)
+    return result
+
 
 def map_sperrinfosys_road_events(
     raw: dict,
@@ -64,6 +93,6 @@ def map_sperrinfosys_road_events(
         ),
         payload=RoadEventPayload(
             city_source="sperrinfosys",
-            events=raw.get("events", []),
+            events=_backfill_events(raw.get("events", [])),
         ),
     )

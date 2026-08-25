@@ -7,6 +7,7 @@ import Docs from "../../../layouts/Docs.astro";
 import CodeTabs from "../../../components/CodeTabs.astro";
 import TryIt from "../../../components/TryIt.astro";
 import JsonLd from "../../../components/JsonLd.astro";
+import DeprecationBanner from "../../../components/DeprecationBanner.astro";
 import { curlFor, jsFor, pyFor } from "../../../lib/codegen";
 
 export async function getStaticPaths() {
@@ -23,7 +24,21 @@ interface OpenApiParameter {
   required?: boolean;
   description?: string;
   descriptionEn?: string;
-  schema?: { type?: string; enum?: unknown[] };
+  example?: unknown;
+  schema?: { type?: string; enum?: unknown[]; default?: unknown; example?: unknown };
+}
+
+// Displayable example value, same precedence as exampleFor in lib/codegen:
+// explicit example -> schema.example -> schema.default. No hit leaves the cell
+// empty (no invented placeholder in the table).
+function exampleOf(p: OpenApiParameter): string {
+  const candidates = [p.example, p.schema?.example, p.schema?.default];
+  for (const value of candidates) {
+    if (typeof value === "string" || typeof value === "number") {
+      return String(value);
+    }
+  }
+  return "";
 }
 
 const { endpoint } = Astro.props;
@@ -99,6 +114,7 @@ const altLangPath = `/api/${endpoint.id}/`;
     <span class={`method ${methodClass}`}>{endpoint.method}</span>
     <span class="path">{endpoint.path}</span>
   </h1>
+  <DeprecationBanner operationId={endpoint.id} lang="en" />
   {summary && <p><strong>{summary}</strong></p>}
   {description && <p>{description}</p>}
 
@@ -112,6 +128,7 @@ const altLangPath = `/api/${endpoint.id}/`;
             <th>In</th>
             <th>Required</th>
             <th>Type</th>
+            <th>Example</th>
             <th>Description</th>
           </tr>
         </thead>
@@ -122,6 +139,7 @@ const altLangPath = `/api/${endpoint.id}/`;
               <td>{p.in}</td>
               <td>{p.required ? "yes" : "no"}</td>
               <td>{p.schema?.type ?? ""}</td>
+              <td>{exampleOf(p) ? <code>{exampleOf(p)}</code> : ""}</td>
               <td>{p.descriptionEn ?? p.description ?? ""}</td>
             </tr>
           ))}

@@ -6,8 +6,8 @@ HTTP, kein Logging, kein ``datetime.now()``. Der ``retrieved_at``-Zeitstempel
 wird keyword-only injiziert, damit Tests deterministisch bleiben.
 
 KRITISCH (Tier-Trennung GOV-02): LHP ist Tier A,
-``source=HOCHWASSER`` (Toggle-/Quellenname ist "lhp", License-/Record-Tag aber
-HOCHWASSER), ``license_id=CC_BY_4_0``, ``license_tier=A``.
+``source=LHP`` (Toggle-/Quellenname ist "lhp", License-/Record-Tag aber
+LHP), ``license_id=CC_BY_4_0``, ``license_tier=A``.
 
 KRITISCH (GOV-03, Pitfall 6): Die CC-BY-4.0-Lizenz der Landeshochwasserportale
 verlangt die Quelle UND einen Stand-Zeitstempel. Die Attribution trägt daher
@@ -60,7 +60,7 @@ def map_flood(
         geo=None,
         observed_at=None,
         retrieved_at=retrieved_at,
-        source=SourceId.HOCHWASSER,
+        source=SourceId.LHP,
         license_id=LicenseId.CC_BY_4_0,
         license_tier=LicenseTier.A,
         ags=ags,
@@ -71,6 +71,9 @@ def map_flood(
         ),
         payload=FloodWarningPayload(
             warnings=raw.get("warnings", []),
+            # Kanonisch as_of; das abgekündigte stand trägt identisch denselben
+            # Wert (Abkündigung 2026-08-01).
             stand=stand,
+            as_of=stand,
         ),
     )

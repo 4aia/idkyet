@@ -2,8 +2,16 @@
 // English landing page. Mirrors the German index with idiomatic copy, TL;DR
 // block and FAQ (FAQPage JSON-LD). Endpoint reference stays German and is
 // linked as "API Reference".
+import { getCollection } from "astro:content";
 import Docs from "../../layouts/Docs.astro";
 import JsonLd from "../../components/JsonLd.astro";
+import { SITE_STATS } from "../../data/site-stats";
+
+// Endpoint count from the single source (docs/openapi.yaml via the endpoints
+// collection), computed at build time so it no longer drifts across hardcoded
+// copies. A drift check (scripts/check-endpoint-count.mjs) fails if a fixed
+// number is reintroduced.
+const endpointCount = (await getCollection("endpoints")).length;
 
 const faqs = [
   {
@@ -86,18 +94,18 @@ const faqJsonLd = JSON.stringify({
       API key.
     </p>
     <ul>
-      <li>84 large cities, 67 data types, 102 endpoints, one unified envelope.</li>
+      <li>{SITE_STATS.cities} large cities, {SITE_STATS.dataTypes} data types, {endpointCount} endpoints, one unified envelope.</li>
       <li>No key required, free and ad-free.</li>
-      <li>Hosted on a server in Germany, with an honest source status.</li>
+      <li>Hosted on servers in Germany and Finland (EU), with an honest source status.</li>
     </ul>
   </div>
 
   <ul class="stats">
-    <li class="stat"><a href="/en/cities/"><strong>84</strong> cities</a></li>
-    <li class="stat"><strong>67</strong> data types</li>
-    <li class="stat"><strong>102</strong> endpoints</li>
-    <li class="stat"><strong>4,300+</strong> data streams, growing</li>
-    <li class="stat"><strong>35+</strong> official sources</li>
+    <li class="stat"><a href="/en/cities/"><strong>{SITE_STATS.cities}</strong> cities</a></li>
+    <li class="stat"><strong>{SITE_STATS.dataTypes}</strong> data types</li>
+    <li class="stat"><strong>{endpointCount}</strong> endpoints</li>
+    <li class="stat"><strong>{SITE_STATS.dataStreams.en}</strong> data streams, growing</li>
+    <li class="stat"><strong>{SITE_STATS.sources.en}</strong> data sources</li>
   </ul>
 
   <div class="hero__actions">
@@ -139,7 +147,7 @@ const faqJsonLd = JSON.stringify({
 
   <h2>What data is available</h2>
   <p>
-    67 data types per city, all permissively licensed (Tier A: DL-DE/BY,
+    {SITE_STATS.dataTypes} data types per city, all permissively licensed (Tier A: DL-DE/BY,
     CC-BY, free for commercial use):
   </p>
   <ul>
@@ -157,11 +165,16 @@ const faqJsonLd = JSON.stringify({
       <strong>Energy and statistics:</strong> energy installations (market
       master data register), electricity consumption and wholesale price
       (SMARD), unemployment rate, tourism overnight stays, building permits,
-      demographics.
+      demographics, sustainability and SDG indicators as a time series since
+      2006.
+      Plus nine further time-series data types from Wegweiser Kommune:
+      population age structure and trend with a forecast to 2040,
+      municipal finances, labour market and commuters, integration,
+      childcare, education statistics, social situation and long-term care.
     </li>
     <li>
       <strong>Water, health, city life:</strong> water levels and flooding,
-      hospitals and ICU beds, POIs, events, election results, public holidays,
+      hospitals, POIs, events, election results, public holidays,
       administrative boundaries.
     </li>
   </ul>

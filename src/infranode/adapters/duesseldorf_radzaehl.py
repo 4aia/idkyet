@@ -1,4 +1,4 @@
-"""Düsseldorf-Radzählstellen-Adapter ``fetch_duesseldorf_radzaehl`` (DATA-40, Tier A).
+"""Düsseldorf-Radzählstellen-Adapter ``fetch_duesseldorf_bike_counts`` (DATA-40).
 
 Liefert je Düsseldorfer Dauerzählstelle den Jahres-Summenwert 2025 keylos aus den
 offenen Stunden-CSVs des städtischen Open-Data-Portals (DL-DE/BY 2.0,
@@ -144,7 +144,7 @@ def _sum_station_csv(text: str) -> int | None:
     return total
 
 
-async def fetch_duesseldorf_radzaehl(
+async def fetch_duesseldorf_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,

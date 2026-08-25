@@ -122,6 +122,15 @@ const coreCount = sorted.filter((c) => c.coverage === "full").length;
     traffic conditions, Berlin traffic messages) plus public-transit real-time
     for all cities:
   </p>
+  <p>
+    You don't need the exact slug: the city name is resolved leniently. The German
+    name with or without umlauts, any casing, and common English exonyms and short
+    forms all resolve to the same city (<code>München</code>, <code>münchen</code>,
+    <code>munich</code>, <code>munchen</code> all resolve to <code>muenchen</code>,
+    <code>cologne</code> to <code>koeln</code>, <code>frankfurt</code> to
+    <code>frankfurt-am-main</code>). An unknown name returns a 404 whose hint
+    suggests the closest slug (“Meintest du …?").
+  </p>
   <ul>
     <li><code>/api/v1/cities/berlin/weather</code></li>
     <li><code>/api/v1/cities/berlin/air-uba</code></li>

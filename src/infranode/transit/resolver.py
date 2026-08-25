@@ -43,6 +43,39 @@ def build_trip_route_index(zip_path: str | Path) -> dict[str, str]:
     }
 
 
+def build_route_name_index(zip_path: str | Path) -> dict[str, str]:
+    """Baut aus ``routes.txt`` eine ``{route_id: route_short_name}``-Map.
+
+    ``routes.txt`` ist klein genug fuer eine vollstaendige In-Memory-Map (wie
+    ``trips.txt``, anders als das GB-grosse ``stop_times.txt``, T-eqr-MEM). Streamt
+    zeilenweise (kein Voll-Lesen, kein Voll-Entpacken). Leere oder fehlende
+    ``route_short_name`` werden weggelassen (ehrlich null-fallback beim Aufrufer,
+    kein erfundener Linienname).
+    """
+    out: dict[str, str] = {}
+    for row in stream_entry(zip_path, "routes.txt"):
+        rid = row.get("route_id")
+        short = (row.get("route_short_name") or "").strip()
+        if rid and short:
+            out[rid] = short
+    return out
+
+
+def build_trip_headsign_index(zip_path: str | Path) -> dict[str, str]:
+    """Baut aus ``trips.txt`` eine ``{trip_id: trip_headsign}``-Map.
+
+    ``trips.txt`` ist klein (wie ``build_trip_route_index``). Streamt zeilenweise.
+    Leere/fehlende ``trip_headsign`` werden weggelassen (kein erfundenes Ziel).
+    """
+    out: dict[str, str] = {}
+    for row in stream_entry(zip_path, "trips.txt"):
+        tid = row.get("trip_id")
+        headsign = (row.get("trip_headsign") or "").strip()
+        if tid and headsign:
+            out[tid] = headsign
+    return out
+
+
 def stop_times_for_trip(zip_path: str | Path, trip_id: str) -> list[dict]:
     """Liefert die nach ``stop_sequence`` sortierten Halte EINER ``trip_id``.
 

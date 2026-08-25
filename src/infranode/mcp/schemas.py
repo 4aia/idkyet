@@ -29,7 +29,8 @@ class ToolMeta(TypedDict, total=False):
     bleiben dank ``extra="allow"`` erhalten.
     """
 
-    __pydantic_config__ = {"extra": "allow"}  # type: ignore[misc]
+    # RUF012 unterdrueckt: pydantic-Konventionsname; TypedDict erlaubt kein ClassVar.
+    __pydantic_config__ = {"extra": "allow"}  # type: ignore[misc]  # noqa: RUF012
 
     source: str
     source_status: str
@@ -37,6 +38,8 @@ class ToolMeta(TypedDict, total=False):
     correlation_id: str
     license: str
     attribution: str
+    # Selbst-korrigierender Hinweis der Transit-Tools (z.B. fehlende stop_id).
+    note: str
 
 
 class ToolEnvelope(TypedDict):

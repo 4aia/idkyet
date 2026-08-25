@@ -1,4 +1,4 @@
-"""Berlin-Radzähldaten-Adapter ``fetch_berlin_radzaehl`` (DATA-40, Tier A).
+"""Berlin-Radzähldaten-Adapter ``fetch_berlin_bike_counts`` (DATA-40, Tier A).
 
 Liefert den jüngsten Stundenwert je Berliner Radzählstelle (~30 Stationen)
 keylos aus der offenen Gesamtdatei (DL-DE/Zero 2.0, SenMVKU, [VERIFIED 2026-06-23]):
@@ -13,7 +13,7 @@ die LETZTE Zeile mit Daten (= frischster Stundenwert) je Station genommen, gejoi
 mit den Koordinaten aus "Standortdaten" über die Zählstelle-ID.
 
 Performance: openpyxl ``read_only``/``data_only`` streamt; der 18-MB-Fetch+Parse
-läuft nur bei Cache-Miss (sehr lange TTL, ``_SOURCE_TTL["berlin_radzaehl"]``).
+läuft nur bei Cache-Miss (sehr lange TTL, ``_SOURCE_TTL["berlin_bike_counts"]``).
 
 Sicherheit (T-9-02 SSRF): Host hartkodiert. DoS-/Datenfehler-Schutz:
 ``raise_for_status()`` (5xx -> STALE-ON-ERROR der Fassade); Felder defensiv.
@@ -101,7 +101,7 @@ def _latest_counts(wb, sheet_name: str) -> tuple[dict[str, int], str | None]:
     return last_values, last_period
 
 
-async def fetch_berlin_radzaehl(
+async def fetch_berlin_bike_counts(
     http: httpx.AsyncClient,
     *,
     slug: str,
@@ -116,7 +116,7 @@ async def fetch_berlin_radzaehl(
     ``lat``/``lon``/``radius_km`` sind vertragskonform Teil der Signatur (ungenutzt;
     Berlin liefert den kompletten Stadt-Datensatz).
 
-    Rückgabe-Keys (exakt das, was ``map_berlin_radzaehl`` erwartet): ``slug``,
+    Rückgabe-Keys (exakt das, was ``map_berlin_bike_counts`` erwartet): ``slug``,
     ``stations`` (je Station name/id/lat/lon/value/period) und ``as_of``.
     """
     resp = await http.get(_XLSX_URL)

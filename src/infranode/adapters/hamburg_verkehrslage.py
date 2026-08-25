@@ -1,4 +1,4 @@
-"""Keyloser Hamburg-Verkehrslage-Adapter ``fetch_hamburg_verkehrslage`` (DATA-26).
+"""Keyloser Hamburg-Verkehrslage-Adapter ``fetch_hamburg_traffic_situation`` (DATA-26).
 
 Direkter, keyloser Zugang zur Echtzeit-Verkehrslage der Freien und Hansestadt
 Hamburg über die OGC API Features (OAF, GeoJSON) der Urban Data Platform (KEIN
@@ -19,7 +19,7 @@ schlanke Punkt-dicts (Mittelpunkt des LineString) zurückgegeben. So entsteht ei
 kompaktes Bild: eine Netz-Zusammenfassung (Zählung je Klasse) plus die konkreten
 Stauabschnitte, ohne das gesamte Straßennetz zu übertragen.
 
-Rückgabe ist das raw-dict, das ``map_hamburg_verkehrslage`` erwartet: ``slug`` =
+Rückgabe ist das raw-dict, das ``map_hamburg_traffic_situation`` erwartet: ``slug`` =
 "hamburg", ``as_of`` (jüngster Datenstand, ISO-UTC, oder None), ``summary``
 (``total`` + ``by_state``) und ``segments`` (gekappte nicht-fließende Abschnitte,
 Priorität gestaut > zäh > dicht). Der Adapter baut KEINEN ``CanonicalRecord`` und
@@ -28,7 +28,7 @@ kennt KEIN Cache/Breaker (das liefert die Resilienz-Fassade).
 durchschlägt und der STALE-ON-ERROR-Pfad greift.
 
 Lizenz: Datenlizenz Deutschland Namensnennung 2.0 (govdata.de/dl-de/by-2-0) =
-Tier A; Attribution "Freie und Hansestadt Hamburg" (wortgenau wie hamburg_baustellen).
+Tier A; Attribution "Freie und Hansestadt Hamburg" (wortgenau wie hamburg_roadworks).
 
 Sicherheit:
 - T-26-SSRF: Host + Collection-Pfad sind in ``_ITEMS_URL`` hartkodiert; es fließt
@@ -132,7 +132,7 @@ async def _fetch_state(
     )
 
 
-async def fetch_hamburg_verkehrslage(http: httpx.AsyncClient) -> dict:
+async def fetch_hamburg_traffic_situation(http: httpx.AsyncClient) -> dict:
     """Holt die Live-Verkehrslage Hamburg und liefert das raw-dict für den Mapper.
 
     Je Zustandsklasse ein Filter-Request: ``fliessend`` nur zur Zählung
@@ -140,7 +140,7 @@ async def fetch_hamburg_verkehrslage(http: httpx.AsyncClient) -> dict:
     ``_SEGMENT_CAP`` konkrete Abschnitte. Daraus die Netz-Zusammenfassung
     (``total`` + ``by_state``) und die priorisierte, global gedeckelte
     Stau-Segmentliste. Rückgabe-Keys (exakt das, was
-    ``map_hamburg_verkehrslage`` erwartet): ``slug`` ("hamburg"), ``as_of``
+    ``map_hamburg_traffic_situation`` erwartet): ``slug`` ("hamburg"), ``as_of``
     (jüngster Datenstand ISO-UTC oder None), ``summary`` und ``segments``.
     """
     by_state: dict[str, int] = {}

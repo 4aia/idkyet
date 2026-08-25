@@ -28,6 +28,7 @@ from mcp.types import ToolAnnotations
 
 from infranode.mcp import tools
 from infranode.mcp.client import ALLOWED_RESOURCES, UpstreamError
+from infranode.mcp.schemas import ToolEnvelope
 from infranode.registry.catalog import CITY_DATA_CATALOG
 
 # Server-Instructions: werden beim initialize an den Client/Agenten ausgeliefert und
@@ -50,14 +51,25 @@ _INSTRUCTIONS = (
     "departures). Most data types are fetched with ONE generic tool: "
     "get_city_resource(slug, resource=<type>), where <type> is the catalog key "
     "(e.g. 'parking', 'charging', 'demographics', 'solar'); its resource enum "
-    "lists every valid key. Find valid city slugs with list_cities (or the "
+    "lists every valid key. City slugs are resolved leniently: you may pass the "
+    "German name with or without umlauts, any casing, a common English exonym or "
+    "a short form (e.g. 'muenchen', 'München', 'munich', 'munchen', 'cologne', "
+    "'frankfurt' all resolve to the canonical slug), so you rarely need the exact "
+    "ASCII slug; an unrecognized name returns a 404 whose hint names the closest "
+    "match ('Meintest du ...?'). Discover the canonical slugs with list_cities (or the "
     "infranode://cities resource); browse every data type with the "
     "infranode://catalog resource; see sources and licenses with sources. "
     "Compare one metric across many cities in one call with compare. Every tool "
     "returns a canonical {data, meta} envelope; meta.source_status tells you whether "
     "a source delivered data (ok / no_data / not_covered / disabled / error), so a "
-    "missing source degrades gracefully instead of failing. Coverage keeps growing: "
-    "more data types and cities are added regularly."
+    "missing source degrades gracefully instead of failing. Field names are "
+    "snake_case and English across all data types (post_code, street, "
+    "house_number, place, name, start, end, distance_km, power_kw, lat, lon); "
+    "timestamps carry a time zone and a missing value is null, never an empty "
+    "string. Some responses still contain older duplicate field names with "
+    "identical values; they are deprecated, so prefer the canonical ones. The "
+    "infranode://catalog resource spells the conventions out. Coverage keeps "
+    "growing: more data types and cities are added regularly."
 )
 
 mcp = FastMCP("infranode", instructions=_INSTRUCTIONS)
@@ -283,13 +295,13 @@ _stamp_datatype_count()
 # MCP Resources: expose the coverage catalog as browsable resources, so clients
 # can discover what InfraNode offers (cities + sources) without a tool call.
 @mcp.resource("infranode://cities")
-async def cities_resource() -> dict:
+async def cities_resource() -> ToolEnvelope:
     """All covered German cities with slug, federal state, population and coverage."""
     return await tools.list_cities()
 
 
 @mcp.resource("infranode://sources")
-async def sources_resource() -> dict:
+async def sources_resource() -> ToolEnvelope:
     """All InfraNode data sources with license, attribution and availability."""
     return await tools.sources()
 
@@ -317,6 +329,39 @@ async def catalog_resource() -> dict:
             "get_city_overview(slug) for a live, per-city view. Where 'tool' is "
             "get_city_resource, pass the 'type' value as its resource argument."
         ),
+        # Feldkonvention (Konsistenz-Audit 2026-07-25): steht bewusst HIER in der
+        # Katalog-Resource und nicht in jeder Tool-Beschreibung - so kostet sie
+        # keine Tokens in der Tool-Liste, ist aber fuer jeden Agenten abrufbar.
+        "field_conventions": {
+            "naming": (
+                "Fields are snake_case and English across all data types. The same "
+                "concept always uses the same name: post_code, street, "
+                "house_number, place, name, start, end, distance_km, power_kw, "
+                "lat, lon."
+            ),
+            "types": (
+                "post_code is always a five-character string, so leading zeros "
+                "survive (01067). Coordinates are numbers (lat/lon, WGS84). "
+                "Timestamps are ISO 8601 and always carry a time zone. A value "
+                "the source does not provide is null, never an empty string."
+            ),
+            "deprecated": (
+                "Legacy names still carry identical values but will be removed no "
+                "earlier than 30 days after the changelog entry of 2026-07-25: "
+                "plz, zip, strasse, hausnummer, ort, city, bezeichnung, beginn, "
+                "ende, art, dist_km, leistung_kw, einheit_typ, plus the camelCase "
+                "raw fields of the Autobahn traffic messages (isBlocked, "
+                "startTimestamp, delayTimeValue, averageSpeed, "
+                "abnormalTrafficType, extent). Prefer the canonical names. In the "
+                "station boards (station_departures/station_arrivals) the "
+                "deprecated stop_id is now trip_stop_id: it identifies one stop "
+                "of one train run and is NOT a station/stop id, so never pass it "
+                "to transit_departures (that one needs the DELFI id from "
+                "get_city_resource(slug, resource='transit')). In the station "
+                "catalog the DB station category is station_category (a number); "
+                "the deprecated category carried the same value."
+            ),
+        },
     }
 
 
@@ -364,7 +409,7 @@ def commute_check(slug: str) -> str:
     )
 
 
-def _mcp_uvicorn_kwargs(settings) -> dict:  # noqa: ANN001 - Settings-Duck-Typing
+def _mcp_uvicorn_kwargs(settings) -> dict:
     """Baut das uvicorn.run-kwargs-Dict der drei MCP-Backpressure-Deckel.
 
     Reine Werte-Abbildung ohne Seiteneffekt (kein uvicorn-Import noetig), damit
@@ -432,10 +477,15 @@ def run() -> None:
         import uvicorn
 
         from infranode.config import get_settings
+        from infranode.mcp.clientip import ClientIpMiddleware
         from infranode.mcp.ratelimit import MCPRateLimitMiddleware
 
         app = mcp.streamable_http_app()
         app.add_middleware(MCPRateLimitMiddleware)
+        # Client-IP je Request in die ContextVar legen (fuer den ntfy-Push je
+        # Tool-Aufruf, s. mcp/clientip.py). Nach dem Rate-Limit registriert ->
+        # laeuft VOR ihm; unkritisch, da nur lesend.
+        app.add_middleware(ClientIpMiddleware)
         # Backpressure-Deckel (quick-260704-ust) ueber die reine, unit-getestete
         # _mcp_uvicorn_kwargs-Funktion: limit_concurrency bremst den bisher
         # backpressure-losen oeffentlichen Endpunkt (uvicorn liefert bei Ueberlast

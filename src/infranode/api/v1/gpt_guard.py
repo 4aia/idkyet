@@ -51,7 +51,7 @@ def _make_storage(settings: Settings):
             "(pro-Prozess, nicht worker-geteilt).",
             uri,
         )
-    except Exception as exc:  # noqa: BLE001 - jeder Storage-Init-Fehler -> Fallback
+    except Exception as exc:
         logger.warning(
             "GPT-Guard: Redis-Storage-Init fehlgeschlagen (%s): %s", uri, exc
         )
@@ -61,7 +61,7 @@ def _make_storage(settings: Settings):
 class GPTActionLimitMiddleware(BaseHTTPMiddleware):
     """Moving-Window-Limit je GPT-Nutzer; feuert NUR bei GPT-Action-Requests."""
 
-    def __init__(self, app, limit: str | None = None) -> None:  # noqa: ANN001 - Starlette-App
+    def __init__(self, app, limit: str | None = None) -> None:
         super().__init__(app)
         s = Settings()
         effective = limit if limit is not None else s.limit_gpt
@@ -77,6 +77,7 @@ class GPTActionLimitMiddleware(BaseHTTPMiddleware):
         # Nur echte Datenrouten drosseln; Health/Docs/Admin bleiben unberührt.
         if (
             self._limiter is None
+            or self._item is None
             or not request.url.path.startswith("/api/v1/")
             or not is_gpt_action(request.headers)
         ):

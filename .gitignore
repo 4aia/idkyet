@@ -73,6 +73,7 @@ docs-site/node_modules/
 
 # Claude Code / harness
 .claude-active
+.claude/
 
 # OS / Editor
 .DS_Store

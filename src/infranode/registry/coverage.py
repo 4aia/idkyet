@@ -106,15 +106,6 @@ _LAND_VALUES_CITIES: frozenset[str] = frozenset(
     c.slug for c in CITY_REGISTRY if c.state in _BORIS_STATES
 )
 
-# solar-roofs (DATA-39): Dach-Solarkataster ist pro Bundesland föderiert (wie
-# BORIS). NRW-Pilot aus dem amtlichen Gemeinde-Aggregat (Seed) -> abgedeckt sind
-# die Register-Städte in NRW. Ein weiteres Land erweitert die Abdeckung, sobald
-# sein Seed vorliegt (dann hier um das Kürzel ergänzen).
-_SOLAR_CADASTRE_STATES = {"NW", "BY", "BE", "HH", "BB"}
-_SOLAR_ROOFS_CITIES: frozenset[str] = frozenset(
-    c.slug for c in CITY_REGISTRY if c.state in _SOLAR_CADASTRE_STATES
-)
-
 # parking (DATA-40 / PARK-08): EIN Parking-Endpunkt je Stadt mit kuratierter
 # Direktquelle. Diese Menge MUSS deckungsgleich zur ``PARKING_CONNECTORS``-Registry in
 # api/v1/cities.py bleiben (der dortige Drift-Guard erzwingt es); eine neue Parkstadt
@@ -123,7 +114,9 @@ _SOLAR_ROOFS_CITIES: frozenset[str] = frozenset(
 # breisgau/heidelberg/heilbronn/ulm), statischer CKAN-Katalog (muenchen), Mobilithek
 # DATEX II (frankfurt-am-main/wuppertal/magdeburg/koeln, koeln seit 2026-07-23 direkt
 # statt ParkenDD), Hamburg-Urban-Platform-WFS (hamburg) und der Übergangs-Aggregator
-# für die noch nicht direkt angebundene Stadt (dresden, bis 25-08).
+# für die noch nicht direkt angebundene Stadt (dresden, bis 25-08). Die frueheren DB-
+# BahnPark-Staedte (statischer Katalog ohne Live-Call) sind mit dem Cleanup 260925
+# entfernt (offline/precompute-only Quelle, keine per-Request-Live-API).
 _PARKING_CITIES: frozenset[str] = frozenset(
     {
         "dortmund",
@@ -143,21 +136,6 @@ _PARKING_CITIES: frozenset[str] = frozenset(
         "dresden",
         "hamburg",
         "koeln",
-        # DB BahnPark statischer Katalog (Register-Städte ohne andere Parken-Quelle)
-        "berlin",
-        "bochum",
-        "bonn",
-        "bremen",
-        "duesseldorf",
-        "duisburg",
-        "erfurt",
-        "essen",
-        "hannover",
-        "mainz",
-        "saarbruecken",
-        "schwerin",
-        "stuttgart",
-        "wiesbaden",
     }
 )
 
@@ -193,14 +171,6 @@ _HERITAGE_CITIES: frozenset[str] = frozenset(
 # verifiziert offen lizenzierten Städte. Eine neue Stadt erweitert automatisch.
 _TREE_CADASTRE_CITIES: frozenset[str] = frozenset(BAUM_WFS)
 
-# district-heating (DATA-41): Fernwärme-/Wärmenetz-Versorgung aus der kommunalen
-# Wärmeplanung, föderiert je Stadt-WFS. Die WFS-Registry (``DISTRICT_HEATING_WFS``)
-# lebt im PRIVATEN Ingest-Modul (``ingest.district_heating``, kein Public-Export);
-# daher wird die Slug-Menge hier gespiegelt (wie road-events/sharing) statt
-# importiert, damit der öffentliche Live-Proxy-Code ohne das private Modul lädt. Eine
-# Modul-Assertion in ``ingest.district_heating`` hält beide Mengen drift-synchron.
-_DISTRICT_HEATING_CITIES: frozenset[str] = frozenset({"berlin", "hamburg"})
-
 # office-wait-times (Quick-260705-jgt): Behoerden-Wartezeiten live. Aktuell NUR
 # Koeln abgedeckt (keyloser Direkt-Feed waiting-od.php); andere Staedte liefern
 # ehrlich not_covered (200, kein 404). Waechst additiv je integrierter Stadt.
@@ -235,254 +205,6 @@ _COUNCIL_CITIES: frozenset[str] = frozenset(
 
 # Single source of truth: Endpunkt-Kennung -> abgedeckte Stadt-Slugs.
 # Die Kennung entspricht dem letzten Pfadsegment der Route (``/cities/{slug}/<key>``).
-# Kinderbetreuung (Wegweiser, CC0): 83 der 84 Register-Staedte. Reutlingen
-# fuehrt die Quelle nicht gemeindescharf. Aus dem Bestand abgeleitet
-# (2026-07-28), nicht geraten.
-_WEGWEISER_CHILDCARE_CITIES: frozenset[str] = frozenset(
-    {
-        "aachen",
-        "augsburg",
-        "bergisch-gladbach",
-        "berlin",
-        "bielefeld",
-        "bochum",
-        "bonn",
-        "bottrop",
-        "braunschweig",
-        "bremen",
-        "bremerhaven",
-        "chemnitz",
-        "cottbus",
-        "darmstadt",
-        "dortmund",
-        "dresden",
-        "duesseldorf",
-        "duisburg",
-        "erfurt",
-        "erlangen",
-        "essen",
-        "frankfurt-am-main",
-        "freiburg-im-breisgau",
-        "fuerth",
-        "gelsenkirchen",
-        "goettingen",
-        "guetersloh",
-        "hagen",
-        "halle-saale",
-        "hamburg",
-        "hamm",
-        "hanau",
-        "hannover",
-        "heidelberg",
-        "heilbronn",
-        "herne",
-        "hildesheim",
-        "ingolstadt",
-        "jena",
-        "kaiserslautern",
-        "karlsruhe",
-        "kassel",
-        "kiel",
-        "koblenz",
-        "koeln",
-        "krefeld",
-        "leipzig",
-        "leverkusen",
-        "ludwigshafen-am-rhein",
-        "luebeck",
-        "magdeburg",
-        "mainz",
-        "mannheim",
-        "moenchengladbach",
-        "moers",
-        "muelheim-an-der-ruhr",
-        "muenchen",
-        "muenster",
-        "neuss",
-        "nuernberg",
-        "oberhausen",
-        "offenbach-am-main",
-        "oldenburg",
-        "osnabrueck",
-        "paderborn",
-        "pforzheim",
-        "potsdam",
-        "recklinghausen",
-        "regensburg",
-        "remscheid",
-        "rostock",
-        "saarbruecken",
-        "salzgitter",
-        "schwerin",
-        "siegen",
-        "solingen",
-        "stuttgart",
-        "trier",
-        "ulm",
-        "wiesbaden",
-        "wolfsburg",
-        "wuerzburg",
-        "wuppertal",
-    }
-)
-
-# Bildungsstatistik (Wegweiser, CC0): 70 Staedte. Es fehlen genau die 14
-# kreisangehoerigen Register-Staedte, weil die Quelle Schul- und
-# Ausbildungsdaten erst ab Kreisebene fuehrt.
-_WEGWEISER_EDUCATION_CITIES: frozenset[str] = frozenset(
-    {
-        "augsburg",
-        "berlin",
-        "bielefeld",
-        "bochum",
-        "bonn",
-        "bottrop",
-        "braunschweig",
-        "bremen",
-        "bremerhaven",
-        "chemnitz",
-        "cottbus",
-        "darmstadt",
-        "dortmund",
-        "dresden",
-        "duesseldorf",
-        "duisburg",
-        "erfurt",
-        "erlangen",
-        "essen",
-        "frankfurt-am-main",
-        "freiburg-im-breisgau",
-        "fuerth",
-        "gelsenkirchen",
-        "hagen",
-        "halle-saale",
-        "hamburg",
-        "hamm",
-        "heidelberg",
-        "heilbronn",
-        "herne",
-        "ingolstadt",
-        "jena",
-        "kaiserslautern",
-        "karlsruhe",
-        "kassel",
-        "kiel",
-        "koblenz",
-        "koeln",
-        "krefeld",
-        "leipzig",
-        "leverkusen",
-        "ludwigshafen-am-rhein",
-        "luebeck",
-        "magdeburg",
-        "mainz",
-        "mannheim",
-        "moenchengladbach",
-        "muelheim-an-der-ruhr",
-        "muenchen",
-        "muenster",
-        "nuernberg",
-        "oberhausen",
-        "offenbach-am-main",
-        "oldenburg",
-        "osnabrueck",
-        "pforzheim",
-        "potsdam",
-        "regensburg",
-        "remscheid",
-        "rostock",
-        "salzgitter",
-        "schwerin",
-        "solingen",
-        "stuttgart",
-        "trier",
-        "ulm",
-        "wiesbaden",
-        "wolfsburg",
-        "wuerzburg",
-        "wuppertal",
-    }
-)
-
-# Pflege (Wegweiser, CC0): 73 Staedte, die uebrigen fuehrt die Quelle erst
-# ab Kreisebene.
-_WEGWEISER_CARE_CITIES: frozenset[str] = frozenset(
-    {
-        "aachen",
-        "augsburg",
-        "berlin",
-        "bielefeld",
-        "bochum",
-        "bonn",
-        "bottrop",
-        "braunschweig",
-        "bremen",
-        "bremerhaven",
-        "chemnitz",
-        "cottbus",
-        "darmstadt",
-        "dortmund",
-        "dresden",
-        "duesseldorf",
-        "duisburg",
-        "erfurt",
-        "erlangen",
-        "essen",
-        "frankfurt-am-main",
-        "freiburg-im-breisgau",
-        "fuerth",
-        "gelsenkirchen",
-        "hagen",
-        "halle-saale",
-        "hamburg",
-        "hamm",
-        "hannover",
-        "heidelberg",
-        "heilbronn",
-        "herne",
-        "ingolstadt",
-        "jena",
-        "kaiserslautern",
-        "karlsruhe",
-        "kassel",
-        "kiel",
-        "koblenz",
-        "koeln",
-        "krefeld",
-        "leipzig",
-        "leverkusen",
-        "ludwigshafen-am-rhein",
-        "luebeck",
-        "magdeburg",
-        "mainz",
-        "mannheim",
-        "moenchengladbach",
-        "muelheim-an-der-ruhr",
-        "muenchen",
-        "muenster",
-        "nuernberg",
-        "oberhausen",
-        "offenbach-am-main",
-        "oldenburg",
-        "osnabrueck",
-        "pforzheim",
-        "potsdam",
-        "regensburg",
-        "remscheid",
-        "rostock",
-        "saarbruecken",
-        "salzgitter",
-        "schwerin",
-        "solingen",
-        "stuttgart",
-        "trier",
-        "ulm",
-        "wiesbaden",
-        "wolfsburg",
-        "wuerzburg",
-        "wuppertal",
-    }
-)
 
 PARTIAL_COVERAGE: dict[str, frozenset[str]] = {
     "flood": frozenset(_CITY_PEGEL),
@@ -491,15 +213,10 @@ PARTIAL_COVERAGE: dict[str, frozenset[str]] = {
     "road-events": _ROAD_EVENTS_CITIES,
     "sharing": _SHARING_CITIES,
     "land-values": _LAND_VALUES_CITIES,
-    "solar-roofs": _SOLAR_ROOFS_CITIES,
     "parking": _PARKING_CITIES,
     "bike-counts": _BIKE_COUNTS_CITIES,
     "heritage": _HERITAGE_CITIES,
     "tree-cadastre": _TREE_CADASTRE_CITIES,
-    "district-heating": _DISTRICT_HEATING_CITIES,
-    "childcare": _WEGWEISER_CHILDCARE_CITIES,
-    "education-stats": _WEGWEISER_EDUCATION_CITIES,
-    "care": _WEGWEISER_CARE_CITIES,
     "office-wait-times": _OFFICE_WAIT_TIMES_CITIES,
     "council-papers": _COUNCIL_CITIES,
     "parking-onstreet": _PARKING_ONSTREET_CITIES,

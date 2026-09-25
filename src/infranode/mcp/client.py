@@ -97,14 +97,11 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         "air",
         "air-uba",
         "weather",
-        "pois",
         "traffic",
-        "transit",
         # DATA-40: unified Parkhaus-Endpunkt je Stadt (ParkenDD ~22 Städte +
         # München-Fallback). Loest die alte, frankfurt-fixe /live/{slug}/parking-
         # Route ab; unabgedeckte Slugs -> 200 not_covered (kein 404).
         "parking",
-        "charging",
         # DATA-42: eRound-Live-Ladebelegung je Stadt (Join Geo-Map + Delta-State).
         "charging-status",
         "water-level",
@@ -121,10 +118,6 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         # Tier A; disabled ohne Schluessel).
         "station-facilities",
         "demographics",
-        "energy",
-        "geo",
-        "election",
-        "holidays",
         "health",
         "road-events",
         "events",
@@ -136,65 +129,23 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         # Quick-260705-ufv: BBK NINA Bevoelkerungsschutz-Warnungen je Stadt (keylos,
         # ARS-basiert, Tier A, Voll-Abdeckung). Ueber get_city_resource.
         "civil-protection-warnings",
-        # DATA-27/28/29: KBA + GENESIS-Trio + Unfallatlas (Tier A, Kreis-Jahreswerte).
-        "vehicle-registrations",
+        # DATA-28: GENESIS-Trio (Tier A, Kreis-Jahreswerte).
         "unemployment",
         "tourism",
         "construction",
-        "accidents",
-        # PKS-01: BKA Polizeiliche Kriminalstatistik (Tier A, Kreis-Jahreswerte).
-        "crime-stats",
         # DATA-30: Tankerkönig Spritpreise (Tier A, aggregiert je Stadt).
         "fuel-prices",
         # DATA-33: GBFS-Bike-/Scooter-Sharing (Tier A, aggregiert je Stadt).
         "sharing",
         # DATA-38: PVGIS-Solar-Einstrahlung + normierter PV-Ertrag je Stadt (Tier A).
         "solar",
-        # DATA-39: Dach-Solarkataster je Stadt (NRW-Pilot, Tier A, Teilabdeckung).
-        "solar-roofs",
-        # DATA-32: INKAR/BBSR sozialökonomische Indikatoren je Kreis (Tier A).
-        "indicators",
-        # Wegweiser Kommune (Bertelsmann Stiftung, CC0): SDG-/Nachhaltigkeits-
-        # Indikatoren je Gemeinde als ZEITREIHE 2006-2023 (Tier A). Ergänzt
-        # "indicators", das je Kennzahl nur den jüngsten Wert trägt.
-        "sustainability",
-        # Die übrigen Wegweiser-Datenarten, alle als Zeitreihe, alle über
-        # ?from=/?to= auf ein Jahresfenster eingrenzbar.
-        "population-structure",
-        "population-trend",
-        "municipal-finance",
-        "labour-market",
-        "integration",
-        "childcare",
-        "education-stats",
-        "social-situation",
-        "care",
         # DATA-35: BORIS amtliche Bodenrichtwerte je Stadt, aggregiert (Tier A).
         "land-values",
-        # DATA-37: Regionalstatistik.de Realsteuer-Hebesätze (Gemeinde) +
-        # Gewerbean-/-abmeldungen (Kreis), Tier A.
-        "tax-rates",
-        "business-registrations",
-        # DATA-37: Regionalstatistik.de beantragte Insolvenzen je Kreis (52411-02
-        # Unternehmen + 52411-03 übrige Schuldner), Tier A.
-        "insolvencies",
         # DATA-34: DB-Timetables Bahnhof-Abfahrten + -Ankünfte Metropolen-Hbf (Tier A).
         "station-departures",
         "station-arrivals",
         # DATA-36: StaDa Bahnhofs-Katalog je Stadt (alle Bahnhöfe mit EVA, Tier A).
         "stations",
-        # DATA-OSM (Tier 1): 10 dedizierte OSM-Overpass-Datenarten (ODbL, Tier B).
-        "playgrounds",
-        "drinking-water",
-        "public-toilets",
-        "markets",
-        "parcel-lockers",
-        "post-offices",
-        "post-boxes",
-        "public-wifi",
-        "recycling-centres",
-        "government-offices",
-        "education",
         # DATA-OSM-Tier-2: Denkmallisten je Bundesland (Land-WFS, coverage-gated).
         "heritage",
         # DATA-OSM-Tier-2: Baumkataster je Stadt (kommunaler WFS, coverage-gated).
@@ -207,9 +158,6 @@ ALLOWED_RESOURCES: frozenset[str] = frozenset(
         # DATA-40: Kommunale Radzählstellen je Stadt (Dauerzählstellen, Tier A,
         # Teilabdeckung). NICHT das sharing-Tool (GBFS-Leihfahrzeuge).
         "bike-counts",
-        # DATA-41: Fernwärme-/Wärmenetz-Versorgung je Stadt (kommunale Wärmeplanung,
-        # föderiert je Stadt-WFS, Tier A, Teilabdeckung berlin/hamburg).
-        "district-heating",
         # Quick-260705-jgt: Behoerden-Wartezeiten je Stadt (live, keylos, Tier A,
         # Teilabdeckung nur koeln). Ueber get_city_resource(slug, "office-wait-times").
         "office-wait-times",

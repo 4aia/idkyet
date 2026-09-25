@@ -121,22 +121,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         attribution="Datenbasis: Deutscher Wetterdienst, eigene Elemente ergänzt",
         ttl=(600.0, 21600.0),
     ),
-    # overpass ist der EINE Registry-Eintrag fuer ALLE OSM-Datenarten (POIs wie
-    # post-offices/parcel-lockers/recycling-centres sowie alle OSM-Features). Er
-    # traegt die Quellen-Identitaet: Lizenz (ODbL) + Attribution fuer /sources,
-    # Coverage, Health-Matrix und den enable_overpass-Toggle.
-    # HINWEIS (Overpass-Abloesung 2026-07-19): die Routen lesen POIs read-only aus
-    # dem osm_pois-Store (Precompute via ingest.osm_pois), es gibt KEIN
-    # client.fetch("overpass", ...) mehr. Das ttl-Feld (Fresh/Stale) und die
-    # overpass-Eintraege in resilience/client.py (Jitter/Concurrency/Cooldown) sind
-    # damit RUHEND (kein Live-Fetch exerziert sie mehr); sie bleiben nur bis zum
-    # geplanten Cleanup stehen und beeinflussen den Request-Pfad nicht.
-    SourceSpec(
-        name="overpass",
-        license_id="odbl",
-        attribution="© OpenStreetMap contributors",
-        ttl=(604800.0, 2592000.0),
-    ),
     # Baustellen/Sperrungen ändern sich im Stunden-, nicht Sekundentakt: Fresh
     # 3 Min spart >90 % der Upstream-Calls, Stale-Notreserve 6h bedient einen
     # BASt-Ausfall stale-on-error statt 503 (TTL-Tuning quick-260717-ttl).
@@ -145,23 +129,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         license_id="dl_de_by_2_0",
         attribution="Bundesanstalt für Straßenwesen (BASt) / Autobahn GmbH",
         ttl=(180.0, 21600.0),
-    ),
-    SourceSpec(
-        name="hvv",
-        license_id="dl_de_by_2_0",
-        attribution="Hamburger Verkehrsverbund GmbH (HVV)",
-    ),
-    SourceSpec(
-        name="delfi",
-        license_id="cc_by_4_0",
-        attribution="Datenquelle: DELFI e.V. / Mobilitätsdaten Deutschland, CC-BY 4.0",
-    ),
-    # Registerdaten der Bundesnetzagentur, langsam-veränderlich -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="bnetza",
-        license_id="cc_by_4_0",
-        attribution="Bundesnetzagentur.de",
-        ttl=_STATIC_STALE_24H,
     ),
     # UBA-Messwerte sind stündlich -> Fresh 30 Min statt 60s-Default; das
     # Stale-Notfenster wächst auf 24h (Vorfall 2026-07-13: air-uba-Keys ohne
@@ -246,20 +213,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         attribution="Statistische Ämter des Bundes und der Länder",
         ttl=(86400.0, 2592000.0),
     ),
-    # Zensus (statisch, mehrjähriger Erhebungszyklus) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="zensus",
-        license_id="dl_de_by_2_0",
-        attribution="Statistisches Bundesamt (Destatis) / Regionalstatistik",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Marktstammdatenregister (Registerdaten, langsam-veränderlich) -> 24h-Stale.
-    SourceSpec(
-        name="mastr",
-        license_id="dl_de_by_2_0",
-        attribution="Bundesnetzagentur - Marktstammdatenregister",
-        ttl=_STATIC_STALE_24H,
-    ),
     # SMARD liefert 15-Min-Slots: Fresh 5 Min, Stale 1h; ältere Strom-Lastdaten
     # wären irreführend, deshalb bewusst kurze Reserve (TTL-Tuning
     # quick-260717-ttl).
@@ -280,43 +233,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         license_id="geonutzv",
         attribution="Datenbasis: Deutscher Wetterdienst",
         ttl=(60.0, 21600.0),
-    ),
-    # Kfz-Statistik (jährliche Fortschreibung) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="kba",
-        license_id="dl_de_by_2_0",
-        attribution="Kraftfahrt-Bundesamt (KBA)",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Unfallatlas (jährliche Datenlieferung) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="unfallatlas",
-        license_id="dl_de_by_2_0",
-        attribution="Statistische Ämter des Bundes und der Länder, Unfallatlas",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Kriminalstatistik (jährliche Veröffentlichung) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="bka_pks",
-        license_id="dl_de_by_2_0",
-        attribution="Polizeiliche Kriminalstatistik (PKS) - Bundeskriminalamt",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # BBSR-Indikatoren (jährliche Fortschreibung) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="inkar",
-        license_id="dl_de_by_2_0",
-        attribution="Bundesinstitut für Bau-, Stadt- und Raumforschung (BBSR), INKAR",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Wegweiser Kommune: Jahresdaten aus einem lokalen Bulk (Ist bis 2023,
-    # Prognosen bis 2040), jährlicher Refresh -> 24h-Stale-Reserve wie INKAR.
-    # CC0 verlangt keine Attribution; wir nennen die Herkunft trotzdem.
-    SourceSpec(
-        name="wegweiser",
-        license_id="cc0",
-        attribution="Wegweiser Kommune, Bertelsmann Stiftung (CC0)",
-        ttl=_STATIC_STALE_24H,
     ),
     SourceSpec(
         name="tankerkoenig",
@@ -344,34 +260,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         license_id="cc_by_4_0",
         attribution="Deutsche Bahn AG",
         ttl=(86400.0, 2592000.0),
-    ),
-    # Regionalstatistik (statisch, jährliche/mehrjährige Fortschreibung) -> 24h-Stale.
-    SourceSpec(
-        name="regionalstatistik",
-        license_id="dl_de_by_2_0",
-        attribution="Statistische Ämter des Bundes und der Länder",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # GeoBasis-DE / BKG (statische Geobasisdaten) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="bkg",
-        license_id="dl_de_by_2_0",
-        attribution="(c) GeoBasis-DE / BKG (Jahr)",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Wahlergebnisse (statisch nach Feststellung) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="bundeswahl",
-        license_id="dl_de_by_2_0",
-        attribution="Die Bundeswahlleiterin",
-        ttl=_STATIC_STALE_24H,
-    ),
-    # Feiertage/Schulferien (deterministisch je Bundesland) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="holidays",
-        license_id="gemeinfrei",
-        attribution="Feiertage und Schulferien je Bundesland, gemeinfrei",
-        ttl=_STATIC_STALE_24H,
     ),
     SourceSpec(
         name="berlin_viz",
@@ -564,13 +452,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         attribution="PVGIS © European Communities, 2001-2026",
         ttl=(86400.0, 2592000.0),
     ),
-    # Solarkataster NRW (statischer Katasterdatensatz) -> 24h-Stale-Reserve.
-    SourceSpec(
-        name="solar_cadastre",
-        license_id="dl_de_zero_2_0",
-        attribution="Land NRW / GeoBasis NRW / LANUK (MaStR), Solarkataster NRW",
-        ttl=_STATIC_STALE_24H,
-    ),
     SourceSpec(
         name="muenchen_parking",
         license_id="dl_de_by_2_0",
@@ -737,16 +618,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ttl=(300.0, 3600.0),
     ),
     SourceSpec(
-        name="db_bahnpark",
-        license_id="dl_de_by_2_0",
-        attribution=(
-            "Parking Information Daten der DB BahnPark, API über den DB API "
-            "Marketplace (https://developers.deutschebahn.com/db-api-marketplace/"
-            "apis/product/parking-information-db-bahnpark)"
-        ),
-        ttl=(300.0, 3600.0),
-    ),
-    SourceSpec(
         name="heritage",
         license_id="dl_de_zero_2_0",
         attribution="Geoportal Berlin / Landesdenkmalamt Berlin, Denkmaldatenbank",
@@ -773,16 +644,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ),
         ttl=(86400.0, 2592000.0),
     ),
-    # DATA-41: Fernwärme-/Wärmenetz-Versorgung je Stadt (föderiert je Stadt-WFS,
-    # je Ursprung lizenzverifiziert). Berlin repräsentativ (DL-DE/Zero 2.0); Hamburg
-    # DL-DE/BY 2.0 trägt der Record je Stadt aus der WFS-Registry. Batch-Ingest, kein
-    # Live-Call im Request-Pfad (lange TTL).
-    SourceSpec(
-        name="district_heating",
-        license_id="dl_de_zero_2_0",
-        attribution="Geoportal Berlin / Energienetze",
-        ttl=(86400.0, 2592000.0),
-    ),
     # Quick-260705-jgt: Koeln Behoerden-Wartezeiten (office-wait-times). Keyloser
     # Direkt-HTTP gegen waiting-od.php, DL-DE/Zero 2.0 = Tier A, reine Live-Daten.
     # Attribution "Stadt Koeln" VERBATIM identisch zum DATA-LICENSES.md-Eintrag.
@@ -807,7 +668,10 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
     # Route aus mappers/oparl.COUNCIL_CITY_LICENSE). Dieser aggregierte Eintrag ist
     # NUR für die /sources-Route; license_id repräsentativ (DL-DE/Zero 2.0, 4 von 8
     # Städten). attribution VERBATIM identisch zur Zeile in DATA-LICENSES.md
-    # (Lizenz-Drift-Gate test_license_gate). Read-only Store -> grosszuegige TTL.
+    # (Lizenz-Drift-Gate test_license_gate). GENUINELY LIVE seit Cleanup 260925 (Route
+    # ruft adapters.oparl.fetch_papers pro Request auf, gecached ueber die resiliente
+    # Fassade); die grosszuegige TTL passt weiterhin (Ratsvorlagen aendern sich nicht
+    # minuetlich).
     SourceSpec(
         name="council",
         license_id="dl_de_zero_2_0",

@@ -72,7 +72,6 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
     DataType(
         "air-uba", "air_quality", "Luftqualität (amtlich)", "Air quality (official)"
     ),
-    DataType("transit", "transit", "ÖPNV-Haltestellen", "Public transit stops"),
     DataType(
         "station-departures",
         "station_departures",
@@ -94,7 +93,6 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
         "Inner-city roadworks",
     ),
     DataType("webcams", "webcams", "Verkehrs-Webcams", "Traffic webcams"),
-    DataType("charging", "charging", "Ladesäulen", "EV charging stations"),
     # DATA-42: eRound-Live-Ladebelegung je Stadt (AFIR DATEX-II V3, CC0). Join
     # aus Geo-Map (statischer Vollbestand) + akkumulierten Belegungs-Deltas.
     DataType(
@@ -106,85 +104,15 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
     DataType("parking", "parking", "Parkhäuser", "Car parks"),
     DataType("fuel-prices", "fuel_prices", "Spritpreise", "Fuel prices"),
     DataType("sharing", "sharing", "Bike- & Scooter-Sharing", "Bike & scooter sharing"),
-    DataType("pois", "pois", "Points of Interest", "Points of interest"),
     DataType("health", "health", "Krankenhäuser", "Hospitals"),
     DataType("water-level", "water_level", "Pegelstände", "Water levels"),
     DataType("flood", "flood", "Hochwasserwarnungen", "Flood warnings"),
-    DataType("geo", "geo", "Geodaten & Grenzen", "Geodata & boundaries"),
     DataType("demographics", "demographics", "Demografie", "Demographics"),
-    DataType(
-        "indicators",
-        "indicators",
-        "Sozioökonomische Indikatoren",
-        "Socioeconomic indicators",
-    ),
-    # Wegweiser Kommune (CC0): SDG-Indikatoren als ZEITREIHE (2006-2023), nicht
-    # als Einzelwert wie "indicators" (INKAR). Voll abgedeckt, laeuft ueber
-    # get_city_resource.
-    DataType(
-        "sustainability",
-        "sustainability",
-        "Nachhaltigkeit & SDG-Indikatoren",
-        "Sustainability & SDG indicators",
-    ),
-    # Die uebrigen Wegweiser-Datenarten (CC0), alle als ZEITREIHE. Voll
-    # abgedeckt bis auf childcare (83), care (73) und education-stats (70),
-    # die in registry.coverage als Teilabdeckung stehen.
-    DataType(
-        "population-structure",
-        "population_structure",
-        "Altersaufbau der Bevölkerung",
-        "Population age structure",
-    ),
-    DataType(
-        "population-trend",
-        "population_trend",
-        "Bevölkerungsentwicklung",
-        "Population trend",
-    ),
-    DataType(
-        "municipal-finance",
-        "municipal_finance",
-        "Kommunale Finanzen",
-        "Municipal finances",
-    ),
-    DataType(
-        "labour-market",
-        "labour_market",
-        "Arbeitsmarkt & Pendler",
-        "Labour market & commuters",
-    ),
-    DataType("integration", "integration", "Integration", "Integration"),
-    DataType("childcare", "childcare", "Kinderbetreuung", "Childcare"),
-    DataType(
-        "education-stats",
-        "education_stats",
-        "Bildungsstatistik",
-        "Education statistics",
-    ),
-    DataType(
-        "social-situation",
-        "social_situation",
-        "Soziale Lage",
-        "Social situation",
-    ),
-    DataType("care", "care", "Pflege", "Long-term care"),
     DataType("unemployment", "unemployment", "Arbeitslosigkeit", "Unemployment"),
     DataType(
         "tourism", "tourism", "Tourismus (Übernachtungen)", "Tourism (overnight stays)"
     ),
     DataType("construction", "construction", "Baugenehmigungen", "Building permits"),
-    DataType("accidents", "accidents", "Verkehrsunfälle", "Road accidents"),
-    DataType("crime-stats", "crime_stats", "Kriminalität", "Crime statistics"),
-    DataType(
-        "vehicle-registrations",
-        "vehicle_registrations",
-        "Kfz-Bestand",
-        "Vehicle registrations",
-    ),
-    DataType("election", "election", "Wahlergebnisse", "Election results"),
-    DataType("holidays", "holidays", "Feiertage", "Public holidays"),
-    DataType("energy", "energy", "Energieanlagen", "Energy installations"),
     DataType("power-load", "power_load", "Netzlast (Strom)", "Grid load (electricity)"),
     DataType(
         "power-price", "power_price", "Strom-Börsenpreis", "Day-ahead power price"
@@ -192,52 +120,8 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
     DataType(
         "solar", "solar", "Solar-Einstrahlung & Ertrag", "Solar irradiation & yield"
     ),
-    DataType(
-        "solar-roofs", "solar_roofs", "Dach-Solarkataster", "Rooftop solar cadastre"
-    ),
     DataType("land-values", "land_values", "Bodenrichtwerte", "Land values"),
-    DataType(
-        "tax-rates", "tax_rates", "Realsteuer-Hebesätze", "Property & trade tax rates"
-    ),
-    DataType(
-        "business-registrations",
-        "business_registrations",
-        "Gewerbe-An- & Abmeldungen",
-        "Business registrations",
-    ),
-    # DATA-37: Regionalstatistik.de beantragte Insolvenzen je Kreis (52411-02
-    # Unternehmen + 52411-03 übrige Schuldner), Tier A. key/tool ASCII.
-    DataType("insolvencies", "insolvencies", "Insolvenzen", "Insolvencies"),
     DataType("events", "events", "Veranstaltungen", "Public events"),
-    # DATA-OSM (Tier 1): dedizierte OSM-Overpass-Datenarten (ODbL, Tier B).
-    DataType("playgrounds", "playgrounds", "Spielplätze", "Playgrounds"),
-    DataType(
-        "drinking-water",
-        "drinking_water",
-        "Trinkwasserbrunnen",
-        "Drinking water fountains",
-    ),
-    DataType(
-        "public-toilets", "public_toilets", "Öffentliche Toiletten", "Public toilets"
-    ),
-    DataType("markets", "markets", "Wochenmärkte", "Markets"),
-    DataType("parcel-lockers", "parcel_lockers", "Paketstationen", "Parcel lockers"),
-    DataType("post-offices", "post_offices", "Postfilialen", "Post offices"),
-    DataType("post-boxes", "post_boxes", "Briefkästen", "Post boxes"),
-    DataType("public-wifi", "public_wifi", "Öffentliches WLAN", "Public Wi-Fi"),
-    DataType(
-        "recycling-centres",
-        "recycling_centres",
-        "Recyclinghöfe",
-        "Recycling centres",
-    ),
-    DataType(
-        "government-offices",
-        "government_offices",
-        "Behörden & Ämter",
-        "Government offices",
-    ),
-    DataType("education", "education", "Bildungseinrichtungen", "Education facilities"),
     # DATA-OSM-Tier-2: Denkmallisten je Bundesland (Land-WFS, coverage-gated).
     DataType("heritage", "heritage", "Denkmäler", "Heritage monuments"),
     # DATA-OSM-Tier-2: Baumkataster je Stadt (kommunaler WFS, coverage-gated).
@@ -265,15 +149,6 @@ CITY_DATA_CATALOG: tuple[DataType, ...] = (
         "bike_counts",
         "Radzählstellen",
         "Bike counters",
-    ),
-    # DATA-41: Fernwärme-/Wärmenetz-Versorgung je Stadt (kommunale Wärmeplanung,
-    # föderiert je Stadt-WFS, Tier A, Teilabdeckung berlin/hamburg). key/tool ASCII,
-    # Label mit korrektem Umlaut.
-    DataType(
-        "district-heating",
-        "district_heating",
-        "Fernwärme & Wärmenetze",
-        "District heating networks",
     ),
     # Quick-260705-jgt: Behoerden-Wartezeiten je Stadt (live, keylos, Tier A,
     # Teilabdeckung nur koeln). key/tool ASCII (Pfadsegment), Label mit korrektem
@@ -337,7 +212,6 @@ _NAMED_TOOLS: dict[str, str] = {
     "overview": "get_city_overview",
     "weather": "weather",
     "air-uba": "air_quality",
-    "pois": "pois",
 }
 
 CITY_DATA_CATALOG = tuple(

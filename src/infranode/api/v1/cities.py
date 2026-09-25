@@ -18,7 +18,6 @@ selbst-korrigierendem Hint, der ``GET /api/v1/health`` nennt (DX-06).
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 import unicodedata
 from collections.abc import Callable
@@ -90,10 +89,7 @@ from infranode.adapters.muenchen_ruhver import (
 )
 from infranode.adapters.muenster_parking import fetch_muenster_parking
 from infranode.adapters.oldenburg_parking import fetch_oldenburg_parking
-from infranode.adapters.overpass import (
-    _ALLOWED_TYPES,
-    _OSM_FEATURES,
-)
+from infranode.adapters.oparl import fetch_papers
 from infranode.adapters.parkendd import fetch_parkendd
 from infranode.adapters.pegelonline import fetch_water_level
 from infranode.adapters.rostock_baustellen import fetch_rostock_road_events
@@ -110,31 +106,14 @@ from infranode.api.errors import (
     NotFoundError,
     UnprocessableError,
     UpstreamError,
-    ValidationFailedError,
 )
 from infranode.api.v1.pagination import (
-    _parse_int_param,
-    paginate,
     paginate_envelope,
     parse_page_params,
 )
-from infranode.archive.bka_pks_db import read_crime_stats
 from infranode.archive.boris_db import read_land_values
-from infranode.archive.council_db import count_council_papers, read_council_papers
-from infranode.archive.inkar_db import read_indicators
-from infranode.archive.kba_db import read_vehicle_registrations
-from infranode.archive.mastr_db import read_energy
-from infranode.archive.osm_pois_db import count_pois, read_pois
-from infranode.archive.regionalstatistik_db import (
-    read_business_registrations,
-    read_insolvencies,
-    read_tax_rates,
-)
-from infranode.archive.store import append_record, read_records
+from infranode.archive.store import append_record
 from infranode.archive.tender_db import read_public_tenders, search_public_tenders
-from infranode.archive.transit_store import read_stops
-from infranode.archive.unfallatlas_db import read_accidents
-from infranode.archive.wegweiser_db import read_series
 from infranode.charging.geomap import load_city_points
 from infranode.charging.store import get_point_statuses
 from infranode.config import Settings
@@ -156,9 +135,7 @@ from infranode.normalization.mappers.bike_counts import (
     map_leipzig_bike_counts,
     map_stuttgart_bike_counts,
 )
-from infranode.normalization.mappers.bka_pks import map_crime_stats
 from infranode.normalization.mappers.boris import map_land_values
-from infranode.normalization.mappers.db_bahnpark import map_db_bahnpark
 from infranode.normalization.mappers.db_fasta import map_station_facilities
 from infranode.normalization.mappers.db_timetables import (
     map_station_arrivals,
@@ -183,19 +160,15 @@ from infranode.normalization.mappers.genesis import (
     map_regional_stat,
 )
 from infranode.normalization.mappers.hamburg_transparenz import map_hamburg_road_events
-from infranode.normalization.mappers.holidays import load_holidays, map_holidays
 from infranode.normalization.mappers.hospital import (
     map_hospital,
     map_hospital_wikidata,
 )
-from infranode.normalization.mappers.inkar import map_indicators
-from infranode.normalization.mappers.kba import map_vehicle_registrations
 from infranode.normalization.mappers.klinik_atlas import map_hospital_atlas
 from infranode.normalization.mappers.koeln_arcgis import map_koeln_road_events
 from infranode.normalization.mappers.koeln_events import map_koeln_events
 from infranode.normalization.mappers.koeln_wartezeiten import map_koeln_wait_times
 from infranode.normalization.mappers.lhp import map_flood
-from infranode.normalization.mappers.mastr import map_mastr_assets
 from infranode.normalization.mappers.mobidata_bw import map_mobidata_road_events
 from infranode.normalization.mappers.mobidata_parkapi import map_mobidata_parking
 from infranode.normalization.mappers.mobilithek_afir import map_city_charging_status
@@ -221,24 +194,15 @@ from infranode.normalization.mappers.muenchen_ruhver import (
 from infranode.normalization.mappers.oparl import (
     COUNCIL_CITY_LICENSE,
     COVERED_COUNCIL_CITIES,
+    map_council_paper,
 )
-from infranode.normalization.mappers.overpass import map_osm_feature, map_overpass_pois
 from infranode.normalization.mappers.parkendd import map_parkendd
 from infranode.normalization.mappers.pegelonline import map_water_level
-from infranode.normalization.mappers.regionalstatistik import (
-    map_business_registrations,
-    map_insolvencies,
-    map_tax_rates,
-)
 from infranode.normalization.mappers.rostock_baustellen import (
     map_rostock_road_events,
 )
 from infranode.normalization.mappers.smard import map_smard
 from infranode.normalization.mappers.solar import map_solar
-from infranode.normalization.mappers.solar_cadastre import (
-    load_solar_roofs,
-    map_solar_roofs,
-)
 from infranode.normalization.mappers.sperrinfosys import (
     map_sperrinfosys_road_events,
 )
@@ -255,14 +219,8 @@ from infranode.normalization.mappers.stadt_parking_b import (
 )
 from infranode.normalization.mappers.tankerkoenig import map_fuel_prices
 from infranode.normalization.mappers.uba import map_air_uba
-from infranode.normalization.mappers.unfallatlas import map_accidents
-from infranode.normalization.mappers.wegweiser import (
-    dataset_indicators,
-    map_indicator_series,
-)
 from infranode.normalization.mappers.wikidata import map_wikidata_city
 from infranode.normalization.mappers.zensus_grid import map_population_density
-from infranode.parking.db_bahnpark_store import load_db_bahnpark
 from infranode.registry import get_city, list_cities
 from infranode.registry.catalog import CITY_DATA_CATALOG
 from infranode.registry.coverage import PARTIAL_COVERAGE, covered_cities, is_covered
@@ -695,14 +653,6 @@ async def city_weather(slug: str, request: Request) -> dict:
     }
 
 
-# Schlüssel aller Katalog-Datenarten (= letztes Pfadsegment von
-# ``/cities/{slug}/<key>``). Genutzt vom 422-Hinweis der POI-Route: raet ein Client
-# ``?type=playgrounds``, nennt der Hinweis den eigenen Endpunkt statt nur die sechs
-# ?type=-Werte. Aus CITY_DATA_CATALOG abgeleitet, damit eine neue Datenart hier nie
-# nachgezogen werden muss.
-_CATALOG_KEYS: frozenset[str] = frozenset(dt.key for dt in CITY_DATA_CATALOG)
-
-
 # --- City-Overview (Owner 2026-06-24): EIN Aufruf zeigt die ganze Breite ----------
 # Stufe 1 = statischer Katalog ALLER Datenarten je Stadt (aus CITY_DATA_CATALOG +
 # Coverage, kein Upstream-Call). Stufe 2 = schlanker Live-Highlight-Snapshot
@@ -1000,193 +950,6 @@ async def city_solar(slug: str, request: Request) -> dict:
             "correlation_id": correlation_id.get(),
             "source_status": "ok",
             "cache_status": status,
-        },
-    }
-
-
-@router.get("/cities/{slug}/solar-roofs")
-async def city_solar_roofs(slug: str) -> dict:
-    """Liefert das Dach-Solarkataster je Stadt im kanonischen Envelope (DATA-39).
-
-    Dach-PV-Potenzial (installierbar, kWp + Jahresertrag MWh) plus Bestand
-    (installiert) je Stadt aus dem amtlichen Gemeinde-Aggregat (NRW-Pilot,
-    Solarkataster NRW, MaStR/LANUK/Geobasis NRW, DL-DE/Zero 2.0 = Tier A). Anders
-    als /solar (PVGIS-Einstrahlung/Ertrag je kWp) trägt diese Route die Mengen
-    je Stadt. Teilabgedeckt (NRW), föderiert je Bundesland wie /land-values.
-
-    KRITISCH (kein Upstream im Request-Pfad, T-08-DEP): liest AUSSCHLIESSLICH aus
-    dem committeten Seed ``data/seeds/solar_cadastre_nrw.json`` via stdlib json,
-    KEIN ``resilient_client``, KEINE Fremd-API.
-
-    Vier ``source_status``-Werte:
-    - ``disabled``: ``enable_solar_cadastre`` per Env-Toggle aus -> data None
-    - ``not_covered``: Stadt außerhalb der abgedeckten Bundesländer (mit
-      covered_cities) -> data None, KEIN 5xx
-    - ``no_data``: abgedeckte Stadt, aber kein Seed-Eintrag -> data None
-    - ``ok``: Seed-Eintrag vorhanden -> SolarRoofsPayload mit Attribution
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings). DATA-06.
-    if not Settings().enable_solar_cadastre:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Teilabdeckung: Stadt außerhalb NRW -> 200 not_covered mit covered_cities.
-    if not is_covered("solar-roofs", entry.slug):
-        return _not_covered("solar-roofs")
-
-    raw = load_solar_roofs(entry.ags)
-    if raw is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "no_data",
-            },
-        }
-
-    record = map_solar_roofs(
-        raw,
-        slug=entry.slug,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/charging")
-async def city_charging(slug: str, request: Request) -> dict:
-    """Liefert E-Ladesäulen-Standorte im kanonischen Envelope (DATA-09).
-
-    Ablauf (DATA-09/06, API-01, GOV-02/03): Register-Lookup (unbekannter
-    Slug -> 404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein read-only
-    Read über ``read_records`` aus dem vorverarbeiteten Datensatz;
-    zurückgegeben wird der jüngste Snapshot (max ``retrieved_at``).
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): Die BNetzA liefert das
-    Ladesäulenregister seit dem Aus des ArcGIS-FeatureServers (HTTP 499) nur
-    noch als ~47-MB-CSV-Bulk-Download. Diese Route liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz, NIE die CSV, und ruft KEINEN
-    ``resilient_client`` auf. Der Datensatz wird offline aktualisiert.
-
-    Nur Stammdaten, KEINE Belegung (Locked Decision). Drei ``source_status``-
-    Werte (analog /energy):
-    - ``disabled``: ``enable_bnetza`` per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber kein Snapshot ->
-      ``read_records`` liefert [] -> data None, KEIN 5xx
-    - ``ok``: jüngster Snapshot -> CanonicalRecord mit Attribution + license_id
-
-    Die ``stations``-Liste ist über ``limit`` (Default 50, max 200) + ``offset``
-    paginierbar; ``meta.pagination`` weist total/returned/truncated ehrlich aus
-    (keine stille Kappung); Offset-Overflow -> leere Seite 200. ``payload.count``
-    bleibt der volle Snapshot-Gesamtbestand (Aggregat != Seitenlänge).
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: deaktiviert -> 200 disabled.
-    if not Settings().enable_bnetza:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Read-only aus dem vorverarbeiteten bnetza-Datensatz (NIE die CSV im
-    # Request-Pfad). Fehlender Datensatz -> [] -> not_ingested, kein 5xx.
-    records = read_records(source="bnetza", tier="A", city_slug=entry.slug)
-    if not records:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    # Jüngster Snapshot: daher hier max(retrieved_at).
-    record = max(records, key=lambda r: r.retrieved_at)
-
-    data = record.model_dump(mode="json")
-    meta = {
-        "correlation_id": correlation_id.get(),
-        "source_status": "ok",
-    }
-    # Listen-Paginierung (DATA-09): stations-Liste begrenzen; count bleibt das
-    # volle Snapshot-Aggregat (delivered_count_field=None).
-    p = parse_page_params(request)
-    paginate_envelope(data, meta, p, list_key="stations")
-    return {"data": data, "meta": meta}
-
-
-@router.get("/cities/{slug}/district-heating")
-async def city_district_heating(slug: str) -> dict:
-    """Liefert die Fernwärme-/Wärmenetz-Versorgung je Stadt im Envelope (DATA-41).
-
-    Aggregat aus den amtlichen Wärmenetz-Geodaten der kommunalen Wärmeplanung,
-    föderiert je Stadt-WFS (wie /solar-roofs, je Ursprung lizenzverifiziert):
-    Berlin (Energienetze, DL-DE/Zero 2.0) + Hamburg (Gebiete mit Wärmenetz,
-    DL-DE/BY 2.0), beide Tier A. Trägt je Stadt die Netzbetreiber, die Zahl der
-    Versorgungs-/Netzflächen und, je nach Quelle, die versorgte Fläche (Berlin)
-    bzw. Hausanschlüsse + Trassenlänge (Hamburg).
-
-    KRITISCH (kein WFS im Request-Pfad, T-08-DEP): liest AUSSCHLIESSLICH read-only
-    den jüngsten Snapshot aus ``tier_a/district_heating/`` (Batch-Ingest
-    ``python -m infranode.ingest.district_heating``), NIE den WFS, KEIN
-    ``resilient_client``.
-
-    Vier ``source_status``-Werte (analog /solar-roofs):
-    - ``disabled``: ``enable_district_heating`` per Env-Toggle aus -> data None
-    - ``not_covered``: Stadt außerhalb der abgedeckten Städte (mit covered_cities)
-    - ``not_ingested``: abgedeckte Stadt, aber kein Snapshot -> data None, KEIN 5xx
-    - ``ok``: jüngster Snapshot -> DistrictHeatingPayload mit Attribution
-    """
-    entry = get_city(slug)
-
-    if not Settings().enable_district_heating:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    if not is_covered("district-heating", entry.slug):
-        return _not_covered("district-heating")
-
-    records = read_records(source="district_heating", tier="A", city_slug=entry.slug)
-    if not records:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = max(records, key=lambda r: r.retrieved_at)
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
         },
     }
 
@@ -1892,275 +1655,6 @@ async def city_station_facilities(slug: str, request: Request) -> dict:
     }
 
 
-def _osm_rows_to_elements(rows: list[dict]) -> list[dict]:
-    """Rekonstruiert aus Store-Zeilen rohe Overpass-Elemente für die Mapper.
-
-    Der Precompute-Store liefert je POI ein flaches dict ``{name, lat, lon, ...extra}``
-    (``osm_pois_db.read_pois``); die unveränderten Mapper (``map_overpass_pois`` /
-    ``map_osm_feature``, ODbL/Tier B, Drift-Tests) erwarten dagegen rohe Overpass-
-    Elemente der Form ``{tags:{name, ...extra}, lat, lon}``. Diese Brücke hält die
-    Lizenz-/Attributions-/Truncation-Ableitung in EINER Quelle (den Mappern),
-    obwohl die Daten jetzt aus dem Store statt live von Overpass kommen.
-    """
-    elements: list[dict] = []
-    for r in rows:
-        tags = {k: v for k, v in r.items() if k not in ("lat", "lon")}
-        elements.append({"tags": tags, "lat": r.get("lat"), "lon": r.get("lon")})
-    return elements
-
-
-@router.get("/cities/{slug}/pois")
-# A002 unterdrueckt: der Parametername IST der oeffentliche Query-Parameter
-# (?type=), eine Umbenennung braeche den API-Vertrag.
-async def city_pois(slug: str, request: Request, type: str) -> dict:  # noqa: A002
-    """Liefert nach Typ gefilterte OSM-POIs im kanonischen Envelope (DATA-04).
-
-    Ablauf (DATA-04/06, API-01, GOV-02): Register-Lookup (unbekannter Slug -> 404
-    mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung (deaktiviert ->
-    200 ``source_status=disabled``, nie 5xx), Typ-Whitelist-Prüfung (unbekannter
-    Typ -> 422, T-05-09), read-only-Lesung aus dem Precompute-Store, Mapping, dann
-    der Daten-Envelope.
-
-    Read-only (wie council-papers/public-tenders): ein periodischer Batch-Ingest
-    (``ingest.osm_pois``, wöchentlich) extrahiert die POIs offline aus dem Geofabrik-
-    Deutschland-Extrakt in den ``osm_pois``-Store; die Route liest AUSSCHLIESSLICH
-    daraus, NIE live über eine Fremd-Overpass-Instanz (keine Fair-Use-/Rate-Limit-
-    Abhängigkeit mehr). ``total_available`` ist der echte Gesamtbestand
-    (``count_pois``), ``items`` die auf ``overpass_max_elements`` gedeckelte
-    Stichprobe (``read_pois``); der Mapper leitet ``truncated`` daraus ab.
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: deaktiviert -> 200 disabled.
-    if not Settings().enable_overpass:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # T-05-09 Injection: unbekannter Typ -> 422. Die Whitelist bleibt die Quelle der
-    # erlaubten POI-Typen (identisch zum Ingest über ``osm_poi_tags``); roher User-
-    # Input gelangt nie in eine Store-Query (``read_pois`` bindet ?-parametrisiert).
-    if type not in _ALLOWED_TYPES:
-        # Befund 2026-07-26: der osm_pois-Store trägt 17 Typen, ``?type=`` erlaubt
-        # aber nur die 6 klassischen POI-Typen. Die anderen 11 (playgrounds,
-        # post-boxes, public-wifi, ...) sind eigene Datenarten mit eigenem Endpunkt.
-        # Wer die hier rät, bekam bisher nur die 6er-Liste und keinen Weg zum Ziel
-        # (live: 58 x 422 auf /cities/osnabrueck/pois am 25.07.). Ist der geratene
-        # Typ eine Katalog-Datenart, nennt der Hinweis jetzt deren Pfad. Der
-        # Katalog bleibt die eine Quelle der Datenart-Schlüssel (kein zweiter
-        # Hartkodier-Ort, der beim Hinzufügen einer Datenart veraltet).
-        hint = f"Erlaubte Typen: {', '.join(sorted(_ALLOWED_TYPES))}."
-        if type in _CATALOG_KEYS:
-            hint = (
-                f"'{type}' ist eine eigene Datenart: "
-                f"GET /api/v1/cities/{entry.slug}/{type}. "
-                f"Über ?type= laufen nur {', '.join(sorted(_ALLOWED_TYPES))}."
-            )
-        raise UnprocessableError(f"Unbekannter POI-Typ '{type}'.", hint=hint)
-
-    # Read-only aus dem Precompute-Store. ``total_available`` = echter Gesamtbestand,
-    # ``items`` = gedeckelte Stichprobe; leerer Store -> ehrliches 200 no_data.
-    max_elements = Settings().overpass_max_elements
-    rows = read_pois(entry.slug, type, limit=max_elements)
-    total = count_pois(entry.slug, type)
-
-    if not rows:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "no_data",
-            },
-        }
-
-    raw = {
-        "slug": entry.slug,
-        "poi_type": type,
-        "elements": _osm_rows_to_elements(rows),
-        "total_available": total,
-    }
-    record = map_overpass_pois(
-        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
-    )
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-async def _osm_feature_response(request: Request, entry, feature: str) -> dict:
-    """Geteilte Logik aller OSM-Feature-Endpunkte (OSM, Tier B copyleft).
-
-    Identischer Ablauf wie ``/pois`` (DATA-04/06): Quellen-Toggle (deaktiviert ->
-    200 ``source_status=disabled``, nie 5xx), read-only-Lesung aus dem Precompute-
-    Store, leerer Store -> 200 ``no_data``, dann Mapping mit ODbL-Attribution und
-    Daten-Envelope. ``feature`` ist stets ein festes, intern gesetztes Literal aus
-    ``_OSM_FEATURES`` (kein User-Input); die je Feature deklarierten Zusatz-Tags
-    (``extra_tags``) reicht der Mapper aus dem Store durch.
-
-    Read-only wie ``/pois``: der Batch-Ingest (``ingest.osm_pois``, wöchentlich)
-    füllt den Store offline, die Route liest AUSSCHLIESSLICH daraus (nie live).
-
-    Die ``items``-Liste ist über ``limit`` (Default 50, max 200) + ``offset``
-    paginierbar; ``meta.pagination`` weist total/returned/truncated ehrlich aus,
-    Offset-Overflow -> leere Seite 200. ``payload.count`` trägt die ausgelieferte
-    Seitenlänge (PoiPayload-Semantik), ``total_available`` bleibt der echte
-    Gesamtbestand aus dem Store. So erben education/playgrounds/post-boxes/
-    parcel-lockers/public-wifi und die übrigen OSM-Features limit/offset."""
-    if not Settings().enable_overpass:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Read-only aus dem Precompute-Store (feature ist internes Literal aus
-    # _OSM_FEATURES). total_available = echter Gesamtbestand, items = gedeckelte
-    # Stichprobe; leerer Store -> ehrliches 200 no_data.
-    max_elements = Settings().overpass_max_elements
-    rows = read_pois(entry.slug, feature, limit=max_elements)
-    total = count_pois(entry.slug, feature)
-
-    if not rows:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "no_data",
-            },
-        }
-
-    raw = {
-        "slug": entry.slug,
-        "poi_type": feature,
-        "extra_tags": list(_OSM_FEATURES[feature].extra_tags),
-        "elements": _osm_rows_to_elements(rows),
-        "total_available": total,
-    }
-    record = map_osm_feature(
-        raw, retrieved_at=datetime.now(UTC), ags=entry.ags, wikidata_qid=entry.qid
-    )
-
-    data = record.model_dump(mode="json")
-    meta = {
-        "correlation_id": correlation_id.get(),
-        "source_status": "ok",
-    }
-    # Listen-Paginierung (DATA-04): items-Liste begrenzen. delivered_count_field=
-    # "count" -> PoiPayload.count == ausgelieferte Seite; total_available bleibt der
-    # echte Gesamtbestand. Der Helper liest limit/offset selbst aus der Query (kein
-    # Depends), daher erben alle OSM-Route-Signaturen die Paginierung.
-    p = parse_page_params(request)
-    paginate_envelope(data, meta, p, list_key="items", delivered_count_field="count")
-    return {"data": data, "meta": meta}
-
-
-@router.get("/cities/{slug}/playgrounds")
-async def city_playgrounds(slug: str, request: Request) -> dict:
-    """Liefert öffentliche Spielplätze (OSM ``leisure=playground``, Tier B)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "playgrounds")
-
-
-@router.get("/cities/{slug}/drinking-water")
-async def city_drinking_water(slug: str, request: Request) -> dict:
-    """Liefert öffentliche Trinkwasserbrunnen (OSM ``amenity=drinking_water``).
-
-    Hinweis: Die OSM-Abdeckung ist je Stadt unterschiedlich vollständig."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "drinking-water")
-
-
-@router.get("/cities/{slug}/public-toilets")
-async def city_public_toilets(slug: str, request: Request) -> dict:
-    """Liefert öffentliche Toiletten (OSM ``amenity=toilets``).
-
-    Je Element werden Barrierefreiheits-Tags ausgewiesen (``wheelchair``,
-    ``changing_table``) sowie ``fee``/``access``/``opening_hours``/``unisex``.
-    Hinweis: Die OSM-Abdeckung ist je Stadt unterschiedlich vollständig."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "public-toilets")
-
-
-@router.get("/cities/{slug}/markets")
-async def city_markets(slug: str, request: Request) -> dict:
-    """Liefert Wochen-/Marktplaetze (OSM ``amenity=marketplace``, Tier B).
-
-    Markttage/Zeiten kommen als optionales ``opening_hours`` je Element (oft leer)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "markets")
-
-
-@router.get("/cities/{slug}/parcel-lockers")
-async def city_parcel_lockers(slug: str, request: Request) -> dict:
-    """Liefert Paketstationen/Locker (OSM ``amenity=parcel_locker``, Tier B).
-
-    ``operator``/``brand`` (DHL/Amazon/DPD/Hermes/GLS) je Element, wenn getaggt."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "parcel-lockers")
-
-
-@router.get("/cities/{slug}/post-offices")
-async def city_post_offices(slug: str, request: Request) -> dict:
-    """Liefert Postfilialen (OSM ``amenity=post_office``, Tier B)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "post-offices")
-
-
-@router.get("/cities/{slug}/post-boxes")
-async def city_post_boxes(slug: str, request: Request) -> dict:
-    """Liefert öffentliche Briefkästen (OSM ``amenity=post_box``, Tier B).
-
-    Leerungszeiten kommen als optionales ``collection_times`` je Element (~3/4
-    der Briefkästen getaggt; ``null``/fehlend = Datenpunkt-Lücke, kein Fehler)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "post-boxes")
-
-
-@router.get("/cities/{slug}/public-wifi")
-async def city_public_wifi(slug: str, request: Request) -> dict:
-    """Liefert öffentliche WLAN-Standorte (OSM ``internet_access=wlan``, Tier B)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "public-wifi")
-
-
-@router.get("/cities/{slug}/recycling-centres")
-async def city_recycling_centres(slug: str, request: Request) -> dict:
-    """Liefert Recycling-/Wertstoffhoefe (OSM ``amenity=recycling`` +
-    ``recycling_type=centre``, Tier B). ``opening_hours`` je Element, wenn getaggt."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "recycling-centres")
-
-
-@router.get("/cities/{slug}/government-offices")
-async def city_government_offices(slug: str, request: Request) -> dict:
-    """Liefert Behoerden/Aemter (OSM ``office=government`` + ``amenity=townhall``).
-
-    Konsolidiert Bürgerämter, Verwaltungs- und sonstige Ämter; der Subtyp steht
-    je Element als optionales ``government``-Tag."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "government-offices")
-
-
-@router.get("/cities/{slug}/education")
-async def city_education(slug: str, request: Request) -> dict:
-    """Liefert Bildungseinrichtungen (OSM ``amenity=school/college/university/
-    kindergarten``, Tier B)."""
-    entry = get_city(slug)
-    return await _osm_feature_response(request, entry, "education")
-
-
 @router.get("/cities/{slug}/heritage")
 async def city_heritage(slug: str, request: Request) -> dict:
     """Liefert Bau-/Denkmal-Objekte je Stadt (Denkmalliste, Land-WFS).
@@ -2598,8 +2092,6 @@ async def city_road_events(slug: str, request: Request) -> dict:
 #  - "mobidata":    fetch_fn(http, slug=, source_uids=, lat=, lon=) (MobiData BW)
 #  - "http_geo":    fetch_fn(http, slug=, lat=, lon=) (München + ParkenDD-Übergang)
 #  - "mobilithek":  fetch_fn(mtls, abo_id=, static_abo_id=, slug=) (DATEX II mTLS)
-#  - "db_store":    Store-Lesung (kein fetch_fn/Upstream im Request-Pfad; DB BahnPark
-#                   statischer Katalog aus dem täglichen Ingest-Snapshot)
 # ``source`` ist zugleich die enable_<source>-Toggle-Basis UND das Cache-/Fassaden-
 # Quellenlabel (build_cache_key stadt-scharf, T-25-25). source_uids/abo_attr/static_attr
 # sind kind-spezifisch. Alle Werte stammen ausschließlich aus DIESER Registry (SSRF
@@ -2616,9 +2108,8 @@ class ParkingConnector(NamedTuple):
     source: str
     kind: str  # "http_direct" | "mobidata" | "http_geo" | "mobilithek"
     # Heterogene Signaturen je kind -> Callable[..., Any] statt object (die
-    # kind-Zweige unten rufen sie mit den passenden Argumenten auf). None nur
-    # bei kind=db_store (Store-Lesung ohne Upstream-Call).
-    fetch_fn: Callable[..., Any] | None
+    # kind-Zweige unten rufen sie mit den passenden Argumenten auf).
+    fetch_fn: Callable[..., Any]
     mapper: Callable[..., Any]
     source_uids: tuple[str, ...] = ()
     abo_attr: str | None = None
@@ -2729,28 +2220,6 @@ PARKING_CONNECTORS: dict[str, ParkingConnector] = {
     # ParkenDD-Übergang bis 25-08 (Owner-Entscheid 2026-07-19; kein Live-Regress):
     # nur noch dresden
     "dresden": ParkingConnector("parkendd", "http_geo", fetch_parkendd, map_parkendd),
-    # DB BahnPark statischer Katalog (kind "db_store": Store-Lesung ohne Upstream-Call
-    # im Request-Pfad; täglicher Ingest schreibt den Snapshot). free=None (nur
-    # statische Kapazität), Tier A dl-de/by. Nur Register-Städte ohne andere Quelle.
-    **{
-        slug: ParkingConnector("db_bahnpark", "db_store", None, map_db_bahnpark)
-        for slug in (
-            "berlin",
-            "bochum",
-            "bonn",
-            "bremen",
-            "duesseldorf",
-            "duisburg",
-            "erfurt",
-            "essen",
-            "hannover",
-            "mainz",
-            "saarbruecken",
-            "schwerin",
-            "stuttgart",
-            "wiesbaden",
-        )
-    },
 }
 
 
@@ -2805,83 +2274,66 @@ async def city_parking(slug: str, request: Request) -> dict:
             },
         }
 
-    if conn.kind == "db_store":
-        # Statischer Katalog (DB BahnPark): Store-Lesung, KEIN Upstream-Call im
-        # Request-Pfad (T-25-19). Snapshot aus dem Daten-Volume, sonst committeter
-        # Seed; leerer Slug -> no_data unten. Kein Cache/Breaker nötig (Datei-Read).
-        raw = {
-            "slug": entry.slug,
-            "as_of": None,
-            "facilities": load_db_bahnpark(settings.db_bahnpark_store_path).get(
-                entry.slug, []
-            ),
-        }
-        status = "STORE"
-    else:
-        http = request.app.state.http
-        fetch_upstream = conn.fetch_fn
-        if fetch_upstream is None:
-            # Nie erreichbar: fetch_fn=None gibt es nur bei kind=db_store, und der
-            # ist oben bedient. Guard fuer die statische Optional-Kette (pyright).
-            raise RuntimeError(f"Connector {source} ohne fetch_fn")
-        if conn.kind == "mobilithek":
-            # mTLS + Abo-Paar; ohne Cert/Abo-ID ehrlich disabled (Graceful Degrade).
-            mobilithek_http = getattr(request.app.state, "mobilithek_http", None)
-            # abo_attr/static_attr sind bei kind=mobilithek in der Registry immer
-            # gesetzt; der None-Zweig existiert fuer die Optional-Kette.
-            abo_id = getattr(settings, conn.abo_attr) if conn.abo_attr else None
-            if mobilithek_http is None or not abo_id:
-                return {
-                    "data": None,
-                    "meta": {
-                        "correlation_id": correlation_id.get(),
-                        "source_status": "disabled",
-                    },
-                }
+    http = request.app.state.http
+    fetch_upstream = conn.fetch_fn
+    if conn.kind == "mobilithek":
+        # mTLS + Abo-Paar; ohne Cert/Abo-ID ehrlich disabled (Graceful Degrade).
+        mobilithek_http = getattr(request.app.state, "mobilithek_http", None)
+        # abo_attr/static_attr sind bei kind=mobilithek in der Registry immer
+        # gesetzt; der None-Zweig existiert fuer die Optional-Kette.
+        abo_id = getattr(settings, conn.abo_attr) if conn.abo_attr else None
+        if mobilithek_http is None or not abo_id:
+            return {
+                "data": None,
+                "meta": {
+                    "correlation_id": correlation_id.get(),
+                    "source_status": "disabled",
+                },
+            }
 
-            async def fetch_fn():
-                return await fetch_upstream(
-                    mobilithek_http,
-                    abo_id=abo_id,
-                    static_abo_id=(
-                        getattr(settings, conn.static_attr)
-                        if conn.static_attr
-                        else None
-                    ),
-                    slug=entry.slug,
-                )
-        elif conn.kind == "mobidata":
-
-            async def fetch_fn():
-                return await fetch_upstream(
-                    http,
-                    slug=entry.slug,
-                    source_uids=list(conn.source_uids),
-                    lat=entry.geo.lat,
-                    lon=entry.geo.lon,
-                )
-        elif conn.kind == "http_geo":
-
-            async def fetch_fn():
-                return await fetch_upstream(
-                    http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
-                )
-        else:  # http_direct: keyloser parameterloser Adapter
-
-            async def fetch_fn():
-                return await fetch_upstream(http)
-
-        client = request.app.state.resilient_client
-        key = build_cache_key(source, city_slug=entry.slug)
-
-        raw, status = await client.fetch(source, key, fetch_fn)
-
-        if raw is None:
-            raise UpstreamError(
-                f"Quelle '{source}' voruebergehend nicht erreichbar, kein gecachter "
-                "Wert vorhanden.",
-                hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
+        async def fetch_fn():
+            return await fetch_upstream(
+                mobilithek_http,
+                abo_id=abo_id,
+                static_abo_id=(
+                    getattr(settings, conn.static_attr)
+                    if conn.static_attr
+                    else None
+                ),
+                slug=entry.slug,
             )
+    elif conn.kind == "mobidata":
+
+        async def fetch_fn():
+            return await fetch_upstream(
+                http,
+                slug=entry.slug,
+                source_uids=list(conn.source_uids),
+                lat=entry.geo.lat,
+                lon=entry.geo.lon,
+            )
+    elif conn.kind == "http_geo":
+
+        async def fetch_fn():
+            return await fetch_upstream(
+                http, slug=entry.slug, lat=entry.geo.lat, lon=entry.geo.lon
+            )
+    else:  # http_direct: keyloser parameterloser Adapter
+
+        async def fetch_fn():
+            return await fetch_upstream(http)
+
+    client = request.app.state.resilient_client
+    key = build_cache_key(source, city_slug=entry.slug)
+
+    raw, status = await client.fetch(source, key, fetch_fn)
+
+    if raw is None:
+        raise UpstreamError(
+            f"Quelle '{source}' voruebergehend nicht erreichbar, kein gecachter "
+            "Wert vorhanden.",
+            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
+        )
 
     # Quelle erreichbar, aber kein Parkhaus -> ehrliches no_data (200).
     if not raw.get("facilities"):
@@ -3687,914 +3139,11 @@ async def city_webcams(slug: str, request: Request, response: Response) -> dict:
     }
 
 
-def _transit_haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Grosskreis-Distanz in km zwischen zwei WGS84-Punkten (rein, deterministisch).
-
-    Lokaler Nachbau des Vorbilds ``_haversine_km`` aus adapters/destination_one.py
-    (die private Funktion wird bewusst NICHT importiert, um keine Modul-Kopplung
-    quer durch die Codebasis zu ziehen).
-    """
-    earth_km = 6371.0088
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    )
-    return 2 * earth_km * math.asin(math.sqrt(a))
-
-
-def _parse_near_param(raw: str) -> tuple[float, float]:
-    """Parst ``near="lat,lon"`` zu (lat, lon) mit WGS84-Bounds-Pruefung.
-
-    Fehlerhaftes Format ODER Werte ausserhalb lat[-90,90]/lon[-180,180] ->
-    ``ValidationFailedError`` (400 invalid_request), BEVOR gerechnet wird
-    (T-eqr-VAL). Kein roher User-String erreicht die Distanz-Rechnung.
-    """
-    hint = "Erwartet: near=lat,lon (z.B. near=52.52,13.405)."
-    parts = raw.split(",", 1)
-    if len(parts) != 2:
-        raise ValidationFailedError(
-            f"Ungueltiger Wert fuer 'near': '{raw}'.", hint=hint
-        )
-    try:
-        lat = float(parts[0])
-        lon = float(parts[1])
-    except (TypeError, ValueError):
-        raise ValidationFailedError(
-            f"Ungueltiger Wert fuer 'near': '{raw}'.", hint=hint
-        ) from None
-    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
-        raise ValidationFailedError(
-            f"Koordinaten ausserhalb des gueltigen Bereichs: '{raw}'.",
-            hint="lat in [-90,90], lon in [-180,180].",
-        )
-    return lat, lon
-
-
-@router.get("/cities/{slug}/transit")
-async def city_transit(slug: str, request: Request) -> dict:
-    """Liefert vorverarbeitete ÖPNV-Haltestellen im kanonischen Envelope (DATA-05).
-
-    Ablauf (DATA-05/06, API-01, GOV-02): Register-Lookup (unbekannter Slug -> 404
-    mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung (beide Quellen
-    aus -> 200 ``source_status=disabled``, nie 5xx), dann ein memory-armer
-    Read über ``read_stops`` je aktivierter Quelle (DELFI und/oder HVV).
-
-    KRITISCH: Diese Route liest AUSSCHLIESSLICH aus dem vorverarbeiteten
-    Datensatz, NIE aus der GTFS-ZIP, und ruft KEINEN resilient_client auf (kein
-    Live-Upstream). Der Datensatz wird offline aktualisiert.
-
-    Drei ``source_status``-Werte:
-    - ``disabled``: beide Quellen per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber noch kein Snapshot (Datei fehlt ->
-      ``read_stops`` liefert []) -> data leer, KEIN 5xx
-    - ``ok``: vorverarbeitete Stops vorhanden -> data nicht leer, je Element
-      Attribution + license_id
-
-    Suche/Filter/Paginierung (Paket 260706-eqr), damit man eine Haltestelle
-    gezielt findet statt die Vollliste (Berlin ~6,7 MB) zu ziehen:
-    - ``?q=alsterdorf``: case-insensitive Substring-Filter auf ``stop_name``
-      (reiner Python-``in``, KEIN Regex/eval aus User-String, T-eqr-INJ).
-    - ``?near=lat,lon`` (+ optional ``?radius_m``, Default 1000): nur Stops im
-      Umkreis, aufsteigend nach Distanz; Muell/Out-of-Bounds -> 400 (T-eqr-VAL).
-    - Default (ohne q/near): erste Seite ueber ``parse_page_params`` (Default 50,
-      Cap 200); ``meta.pagination`` weist total/returned/limit/offset/truncated
-      ehrlich aus (No silent caps). ``source_status`` haengt am Vorhandensein
-      eines Snapshots (VOR dem Filter), nicht am Filter-Ergebnis.
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: beide aus -> 200 disabled.
-    s = Settings()
-    if not (s.enable_delfi or s.enable_hvv):
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Je aktivierter Quelle den vorverarbeiteten Snapshot lesen (NIE die ZIP).
-    # Fehlende Datei -> [] (Batch nicht gelaufen) -> not_ingested, kein 5xx.
-    records: list = []
-    for source, enabled in (("delfi", s.enable_delfi), ("hvv", s.enable_hvv)):
-        if enabled:
-            records.extend(read_stops(entry.slug, source=source))
-
-    # Snapshot-Status VOR dem Filtern ermitteln: "ok", sobald ueberhaupt ein
-    # Snapshot existierte (auch wenn q/near danach 0 Treffer liefert), sonst
-    # "not_ingested". So bleibt eine leere Trefferliste ehrlich "ok".
-    status = "ok" if records else "not_ingested"
-
-    # 1. q-Filter: case-insensitive Substring auf stop_name (reiner Python-`in`,
-    #    KEIN eval/Regex-aus-User-String, T-eqr-INJ).
-    q = request.query_params.get("q")
-    if q and q.strip():
-        needle = q.strip().lower()
-        records = [r for r in records if needle in r.payload.stop_name.lower()]
-
-    # 2. near-Filter: nur Stops im Umkreis, aufsteigend nach Distanz. Parsing +
-    #    Bounds-Pruefung (T-eqr-VAL) BEVOR gerechnet wird; radius_m ueber denselben
-    #    Validierungsstil wie parse_page_params (nicht-numerisch/<1 -> 400).
-    near = request.query_params.get("near")
-    if near is not None:
-        near_lat, near_lon = _parse_near_param(near)
-        radius_m = _parse_int_param(
-            request.query_params.get("radius_m"),
-            name="radius_m",
-            minimum=1,
-            default=1000,
-        )
-        radius_km = radius_m / 1000
-        with_dist: list[tuple[float, object]] = []
-        for r in records:
-            if r.geo is None:
-                continue  # Stops ohne Koordinate koennen nicht verortet werden.
-            dist = _transit_haversine_km(near_lat, near_lon, r.geo.lat, r.geo.lon)
-            if dist <= radius_km:
-                with_dist.append((dist, r))
-        with_dist.sort(key=lambda t: t[0])
-        records = [r for _, r in with_dist]
-
-    # 3. Paginierung auf der CanonicalRecord-Liste. paginate_envelope passt NICHT
-    #    (data ist hier eine flache Record-Liste, kein payload-Envelope), daher
-    #    paginate() + meta.pagination MANUELL in identischer Form setzen.
-    p = parse_page_params(request)
-    total = len(records)
-    page = paginate(records, p, sort_whitelist=set())
-
-    return {
-        "data": [r.model_dump(mode="json") for r in page],
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": status,
-            "pagination": {
-                "total": total,
-                "returned": len(page),
-                "limit": p.limit,
-                "offset": p.offset,
-                "truncated": p.offset + len(page) < total,
-            },
-        },
-    }
-
-
-@router.get("/cities/{slug}/geo")
-async def city_geo(slug: str) -> dict:
-    """Liefert BKG-Verwaltungsgrenzen im kanonischen Envelope (DATA-19).
-
-    Ablauf (DATA-19/06, API-01, GOV-02/03): Register-Lookup (unbekannter Slug -> 404
-    mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung (deaktiviert ->
-    200 ``source_status=disabled``, nie 5xx), dann ein memory-armer read-only
-    Snapshot-Read über ``read_stops(slug, source="bkg")``.
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): Diese Route liest AUSSCHLIESSLICH
-    aus dem vorverarbeiteten BKG-Datensatz, NIE aus der VG250-GeoJSON, und ruft
-    KEINEN ``resilient_client`` auf. Der Datensatz wird offline aktualisiert.
-
-    KRITISCH (Scope): NUR Grenzen + Namen + Fläche (AGS/GEN-Name/area_km2).
-    Geocoding/PLZ ist BEWUSST NICHT enthalten (Tier-B/C-Geocoder Out of Scope).
-
-    Drei ``source_status``-Werte:
-    - ``disabled``: ``enable_bkg`` per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber noch kein Snapshot (Datei fehlt ->
-      ``read_stops`` liefert []) -> data None, KEIN 5xx (Batch noch nicht gelaufen)
-    - ``ok``: vorverarbeitete Verwaltungsgrenze vorhanden -> admin_boundary-Payload
-      mit Attribution + license_id
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled, nie 5xx.
-    s = Settings()
-    if not s.enable_bkg:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Read-only-Snapshot aus dem bkg-Datensatz (NIE die GeoJSON).
-    # Fehlende Datei -> [] -> not_ingested, kein 5xx.
-    # record_id/content_hash werden im Reader gestrippt (extra=forbid).
-    records = read_stops(entry.slug, source="bkg")
-    status = "ok" if records else "not_ingested"
-
-    return {
-        "data": [r.model_dump(mode="json") for r in records] if records else None,
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": status,
-        },
-    }
-
-
-@router.get("/cities/{slug}/election")
-async def city_election(slug: str) -> dict:
-    """Liefert Bundeswahl-Ergebnisse im kanonischen Envelope (DATA-20).
-
-    Ablauf (DATA-20/06, API-01, GOV-02/03): Register-Lookup (unbekannter Slug ->
-    404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein
-    memory-armer read-only Snapshot-Read über
-    ``read_stops(slug, source="bundeswahl")``.
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): Diese Route liest
-    AUSSCHLIESSLICH aus dem vorverarbeiteten Bundeswahl-Datensatz, NIE aus der
-    kerg-CSV, und ruft KEINEN ``resilient_client`` auf. Der Datensatz wird offline
-    aktualisiert.
-
-    KRITISCH (Pitfall 7, GOV-03): Die Granularität ist ehrlich "teilweise"
-    (Wahlkreis/Kreis-Ebene, nur kreisfreie Städte stadtscharf, kommunale Ebene
-    Out of Scope). Eine nicht-kreisfreie Stadt ohne Snapshot -> ``not_ingested``
-    (ehrlich, kein 5xx). Granularität + Attribution stehen je Record-Payload.
-
-    Drei ``source_status``-Werte:
-    - ``disabled``: ``enable_bundeswahl`` per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber kein Snapshot (Datei fehlt ->
-      ``read_stops`` liefert []) -> data None, KEIN 5xx (Batch nicht gelaufen)
-    - ``ok``: vorverarbeitetes Wahlergebnis vorhanden -> election_result-Payload
-      mit Attribution + license_id
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled, nie 5xx.
-    s = Settings()
-    if not s.enable_bundeswahl:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Read-only-Snapshot aus dem bundeswahl-Datensatz (NIE die kerg-CSV).
-    # Fehlende Datei -> [] -> not_ingested, kein 5xx.
-    # record_id/content_hash werden im Reader gestrippt (extra=forbid).
-    records = read_stops(entry.slug, source="bundeswahl")
-    status = "ok" if records else "not_ingested"
-
-    return {
-        "data": [r.model_dump(mode="json") for r in records] if records else None,
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": status,
-        },
-    }
-
-
-@router.get("/cities/{slug}/holidays")
-async def city_holidays(slug: str) -> dict:
-    """Liefert gemeinfreie Feiertage + Schulferien im kanonischen Envelope (DATA-21).
-
-    Ablauf (DATA-21/06, API-01, GOV-02/03): Register-Lookup (unbekannter Slug ->
-    404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein
-    Seed-Read über ``load_holidays(entry.state, jahr)`` aus den eingebetteten
-    Seeds ``data/seeds/holidays_<jahr>.json`` + ``schulferien_<jahr>.json``.
-
-    KRITISCH (kein Upstream im Request-Pfad, T-08-DEP): Diese Route liest
-    AUSSCHLIESSLICH aus den committeten statischen Seeds via stdlib ``json``,
-    ruft KEINE Laufzeit-Fremd-API auf, KEIN ``resilient_client``.
-
-    KRITISCH (Gray-Area, GOV-02): Feiertage/Schulferien sind GEMEINFREIE Fakten
-    (Tier C, nur Live-Anzeige), so in der Attribution markiert. Die Seeds sind
-    statisch im Repo (kein DB-Schutzrecht).
-
-    Drei ``source_status``-Werte:
-    - ``disabled``: ``enable_holidays`` per Env-Toggle aus -> data None
-    - ``no_data``: Quelle aktiv, aber keine Seed-Einträge für Bundesland/Jahr
-      (z. B. fehlende Datei) -> data None, KEIN 5xx (ehrlich)
-    - ``ok``: Seed-Einträge vorhanden -> holiday-Payload je entry.state mit
-      Attribution + license_id (gemeinfrei, nicht permissiv lizenziert)
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled, nie 5xx.
-    s = Settings()
-    if not s.enable_holidays:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Jahr aus dem aktuellen Datum (statische Jahres-Seeds). Fehlende Seed-Daten
-    # für Bundesland/Jahr -> leere Listen -> no_data (ehrlich, kein 5xx, kein
-    # Fremd-API). Gemeinfreie statische Seeds.
-    jahr = datetime.now(UTC).year
-    data = load_holidays(entry.state, jahr)
-    if not (data["holidays"] or data["school_holidays"]):
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "no_data",
-            },
-        }
-
-    record = map_holidays(
-        entry.state,
-        jahr,
-        data["holidays"],
-        data["school_holidays"],
-        slug=entry.slug,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/energy")
-async def city_energy(slug: str, request: Request) -> dict:
-    """Liefert MaStR-Energieanlagen im kanonischen Envelope (DATA-18).
-
-    Ablauf (DATA-18/06, API-01, GOV-02/03): Register-Lookup (unbekannter Slug ->
-    404 mit Hint über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein
-    parametrisierter Read über ``read_energy`` aus dem datierten vorverarbeiteten
-    Datensatz (jüngster Snapshot via MAX(ingest_date)), optional gefiltert
-    nach ``type`` (pv/wind/speicher/biogas).
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): Diese Route liest
-    AUSSCHLIESSLICH aus dem vorverarbeiteten Datensatz, NIE aus der >1-GB-XML-ZIP,
-    und ruft KEINEN ``resilient_client`` auf. Der Datensatz wird offline aktualisiert.
-
-    Der gemappte Record ist die Live-Sicht auf den jüngsten Snapshot.
-
-    Drei ``source_status``-Werte:
-    - ``disabled``: ``enable_mastr`` per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber kein Snapshot (DB/Tabelle fehlt ->
-      ``read_energy`` liefert []) -> data None, KEIN 5xx
-    - ``ok``: vorverarbeitete Anlagen vorhanden -> gemappter energy_asset-Payload
-      mit Attribution + license_id
-
-    Die ``assets``-Liste ist über ``limit`` (Default 50, max 200) + ``offset``
-    paginierbar; ``meta.pagination`` weist total/returned/truncated ehrlich aus,
-    Offset-Overflow -> leere Seite 200. count/by_type/total_power_kw/power_by_type
-    bleiben die vollen Snapshot-Aggregate (Aggregat != Seitenlänge).
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled.
-    s = Settings()
-    if not s.enable_mastr:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Optionaler Anlagen-Typ-Filter aus der Query (pv/wind/speicher/biogas).
-    # Der Wert fließt parametrisiert in die SQLite-Query (?-Binding, T-08-SQLI),
-    # nie roh in einen f-string.
-    plant_type = request.query_params.get("type")
-
-    # Parametrisierter Read aus dem vorverarbeiteten Datensatz (NIE die ZIP).
-    # Fehlende DB/Tabelle -> [] -> not_ingested, kein 5xx.
-    rows = read_energy(entry.slug, ags=entry.ags, plant_type=plant_type)
-
-    if not rows:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_mastr_assets(
-        entry.slug,
-        rows,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-
-    data = record.model_dump(mode="json")
-    meta = {
-        "correlation_id": correlation_id.get(),
-        "source_status": "ok",
-    }
-    # Listen-Paginierung (DATA-18): assets-Liste begrenzen. delivered_count_field=
-    # None -> count/by_type/total_power_kw/power_by_type bleiben die vollen
-    # Snapshot-Aggregate (Auflage 2: Aggregat != Seitenlänge).
-    p = parse_page_params(request)
-    paginate_envelope(data, meta, p, list_key="assets")
-    return {"data": data, "meta": meta}
-
-
-@router.get("/cities/{slug}/vehicle-registrations")
-async def city_vehicle_registrations(slug: str, request: Request) -> dict:
-    """Liefert den KBA-Pkw-Bestand + Elektro-Anteil im kanonischen Envelope (DATA-27).
-
-    Ablauf (analog ``city_energy``, API-01, GOV-02/03): Register-Lookup
-    (unbekannter Slug -> 404 über den zentralen Handler), Quellen-Toggle-Prüfung
-    (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), dann ein
-    parametrisierter Read über ``read_vehicle_registrations`` aus dem datierten
-    Bulk-Datensatz (jüngster Snapshot via MAX(ingest_date)).
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): Diese Route liest
-    AUSSCHLIESSLICH aus dem vorverarbeiteten Datensatz und ruft KEINEN
-    ``resilient_client`` auf. Der Datensatz wird offline aktualisiert.
-
-    Regionale Auflösung ist der Zulassungsbezirk (= Kreis/kreisfreie Stadt); der
-    Payload weist ihn über ``district``/``district_key`` ehrlich aus. Drei
-    ``source_status``-Werte:
-    - ``disabled``: ``enable_kba`` per Env-Toggle aus -> data None
-    - ``not_ingested``: Quelle aktiv, aber kein Snapshot für den Kreis der Stadt
-      (DB/Tabelle/Zeile fehlt) -> data None, KEIN 5xx
-    - ``ok``: Daten vorhanden -> gemappter vehicle_registration-Payload
-    """
-    entry = get_city(slug)
-
-    # Quellen-Toggle frisch lesen (Settings() statt app.state.settings, damit der
-    # per-Test gesetzte Env-Override greift). DATA-06: aus -> 200 disabled.
-    s = Settings()
-    if not s.enable_kba:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    # Parametrisierter Read aus dem vorverarbeiteten Datensatz (NIE der Bulk-Pull).
-    # Fehlende DB/Tabelle/Zeile -> None -> not_ingested, kein 5xx.
-    row = read_vehicle_registrations(entry.slug, ags=entry.ags)
-
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_vehicle_registrations(
-        entry.slug,
-        row,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    # Anders als die MaStR-Route schreibt KBA den gemappten Record zusätzlich in
-    # die Tier-A-Tagespartition (wie SMARD): so wächst eine Tageszeitreihe, aus
-    # der der nachgelagerte Analyst den Pkw-Bestand/Elektro-Anteil je Stufe lesen
-    # kann. Die Per-Tag-Aggregation entdoppelt mehrfache Abrufe desselben Tages.
-    await append_record(record, source="kba")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/accidents")
-async def city_accidents(slug: str, request: Request) -> dict:
-    """Liefert das Unfallatlas-Jahres-Aggregat je Stadt im Envelope (DATA-29).
-
-    Ablauf wie ``city_vehicle_registrations`` (Store-read, KEIN resilient_client):
-    Register-Lookup (unbekannt -> 404), Toggle-Prüfung (aus -> 200 disabled),
-    parametrisierter Read über ``read_accidents`` aus dem Bulk-Datensatz (je
-    5-stelligem Kreisschlüssel). Regionale Auflösung Kreis/kreisfreie Stadt
-    (district_key). Drei ``source_status``: disabled / not_ingested (kein Snapshot
-    für den Kreis) / ok. Der ok-Record wird zusätzlich ins Tier-A-Archiv
-    geschrieben (Analyst-Speisung, wie KBA).
-    """
-    entry = get_city(slug)
-
-    if not Settings().enable_unfallatlas:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    row = read_accidents(entry.slug, ags=entry.ags)
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_accidents(
-        entry.slug,
-        row,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    await append_record(record, source="unfallatlas")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/crime-stats")
-async def city_crime_stats(slug: str, request: Request) -> dict:
-    """Liefert die BKA-PKS-Kriminalstatistik je Stadt im Envelope (PKS-01).
-
-    Ablauf wie ``city_accidents`` (Store-read, KEIN resilient_client): Register-
-    Lookup (unbekannt -> 404), Toggle-Prüfung (aus -> 200 disabled),
-    parametrisierter Read über ``read_crime_stats`` aus der offline befüllten
-    SQLite-Kreis-Falltabelle (je 5-stelligem Kreisschlüssel). Geliefert werden je
-    Hauptstraftatengruppe Fälle, Häufigkeitszahl (HZ, Fälle je 100.000
-    Einwohner) und Aufklärungsquote (AQ in Prozent). Drei ``source_status``:
-    disabled / not_ingested (kein Snapshot für den Kreis) / ok. Der ok-Record
-    wird zusätzlich ins Tier-A-Archiv geschrieben (Analyst-Speisung, wie
-    ``accidents``).
-    """
-    entry = get_city(slug)
-
-    if not Settings().enable_bka_pks:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    row = read_crime_stats(entry.slug, ags=entry.ags)
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_crime_stats(
-        entry.slug,
-        row["groups"],
-        reference_year=row["jahr"],
-        version=row["version"],
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    await append_record(record, source="bka_pks")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/indicators")
-async def city_indicators(slug: str, request: Request) -> dict:
-    """Liefert die kuratierten INKAR/BBSR-Indikatoren je Stadt im Envelope (DATA-32).
-
-    Ablauf wie ``city_vehicle_registrations``/``city_accidents`` (Store-read, KEIN
-    resilient_client): Register-Lookup (unbekannt -> 404), Toggle-Prüfung (aus ->
-    200 disabled), parametrisierter Read über ``read_indicators`` aus dem Bulk-
-    Datensatz (je 5-stelligem Kreisschlüssel). Regionale Auflösung Kreis/
-    kreisfreie Stadt. Drei ``source_status``:
-    - ``disabled``: ``enable_inkar`` per Env-Toggle aus -> data None
-    - ``not_ingested``: kein Snapshot für den Kreis der Stadt -> data None, kein 5xx
-    - ``ok``: gemappter indicators-Payload (Liste der Kennzahlen je Kategorie)
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz; der INKAR-Wizard-Pull läuft offline als Batch.
-    """
-    entry = get_city(slug)
-
-    if not Settings().enable_inkar:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    rows = read_indicators(entry.slug, ags=entry.ags)
-    if not rows:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_indicators(
-        entry.slug,
-        rows,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    await append_record(record, source="inkar")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-# Jahresspanne, die der Wegweiser-Bestand ueberhaupt kennt: Ist-Daten ab 2006,
-# Bevoelkerungsprognosen bis 2040. Grenzen fuer die ?from=/?to=-Validierung.
-_WEGWEISER_MIN_YEAR = 2006
-_WEGWEISER_MAX_YEAR = 2040
-
-
-def _wegweiser_year(request: Request, name: str) -> int | None:
-    """Liest ``from``/``to`` aus der Query und validiert streng (Zero-Trust, #5).
-
-    Erlaubt sind vier Ziffern in einem Bereich, den die Quelle überhaupt kennt
-    (2006 bis 2040). Alles andere ist ein Eingabefehler und wird zu 400
-    gemappt, statt still ein leeres Ergebnis zu liefern: ``?from=zwanzig`` als
-    "keine Daten" auszugeben wäre irreführend.
-    """
-    raw = request.query_params.get(name)
-    if raw is None or raw == "":
-        return None
-    try:
-        year = int(raw)
-    except ValueError:
-        raise ValidationFailedError(
-            f"Parameter '{name}' muss eine Jahreszahl sein (z.B. 2020)."
-        ) from None
-    if not (_WEGWEISER_MIN_YEAR <= year <= _WEGWEISER_MAX_YEAR):
-        raise ValidationFailedError(
-            f"Parameter '{name}' liegt ausserhalb des Bestands "
-            f"({_WEGWEISER_MIN_YEAR} bis {_WEGWEISER_MAX_YEAR})."
-        )
-    return year
-
-
-async def _wegweiser_dataset(slug: str, dataset: str, request: Request) -> dict:
-    """Gemeinsamer Handler für alle Datenarten aus dem Wegweiser-Bulk (CC0).
-
-    Bewusst EIN Handler statt einer Kopie je Datenart: die Datenarten
-    unterscheiden sich ausschließlich in der Themen-Auswahl aus
-    ``mappers.wegweiser.TOPIC_TO_DATASET``. Eine weitere Datenart ist damit ein
-    Registry-Eintrag plus eine dreizeilige Route, kein neuer Handler.
-
-    Optional grenzen ``?from=`` und ``?to=`` die Zeitreihe ein (beide inklusive).
-    Ohne sie kommt die volle Reihe, damit bestehende Clients unverändert
-    weiterlaufen. Für die großen Datenarten ist der Filter praktisch nötig:
-    ``population-structure`` wiegt ungefiltert rund 90 KB, mit ``?from=2023``
-    einen Bruchteil davon.
-
-    Ablauf wie ``city_indicators`` (Store-read, KEIN resilient_client):
-    Register-Lookup (unbekannt -> 404), Toggle-Prüfung (aus -> 200 disabled),
-    parametrisierter Read über ``read_series`` aus dem Bulk. Drei
-    ``source_status``:
-    - ``disabled``: ``enable_wegweiser`` per Env-Toggle aus -> data None
-    - ``not_ingested``: kein Snapshot für diese Stadt/Datenart -> data None,
-      kein 5xx (gilt auch für die kreisangehörigen Städte, denen die Quelle
-      einen Teil der Indikatoren nicht gemeindescharf liefert, und für ein
-      Jahresfenster, in dem diese Stadt keine Werte hat)
-    - ``ok``: gemappter indicator_series-Payload mit Zeitreihe je Indikator
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz; der Wegweiser-Zug läuft offline als Jahresbatch.
-    """
-    entry = get_city(slug)
-    year_from = _wegweiser_year(request, "from")
-    year_to = _wegweiser_year(request, "to")
-    if year_from is not None and year_to is not None and year_from > year_to:
-        raise ValidationFailedError(
-            "Parameter 'from' darf nicht groesser als 'to' sein."
-        )
-
-    if not Settings().enable_wegweiser:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    rows = read_series(
-        entry.slug,
-        ags=entry.ags,
-        indicators=dataset_indicators(dataset),
-        year_from=year_from,
-        year_to=year_to,
-    )
-    if not rows:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_indicator_series(
-        entry.slug,
-        rows,
-        dataset=dataset,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    await append_record(record, source="wegweiser")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/sustainability")
-async def city_sustainability(slug: str, request: Request) -> dict:
-    """Liefert die Nachhaltigkeits-/SDG-Indikatoren je Stadt als Zeitreihe.
-
-    53 Indikatoren aus dem Wegweiser Kommune (Bertelsmann Stiftung, CC0) zu den
-    UN-Nachhaltigkeitszielen auf kommunaler Ebene: Flächeninanspruchnahme,
-    Naherholungsflächen, erneuerbare Energie im Wohnungsneubau,
-    Breitbandversorgung, Beschäftigung, Bildung, soziale Teilhabe und weitere.
-    Jahresdaten, in der Regel 2006 bis 2023, je Indikator mit voller Reihe.
-    Optional per ``?from=``/``?to=`` auf ein Jahresfenster eingrenzbar.
-    """
-    return await _wegweiser_dataset(slug, "sustainability", request)
-
-
-@router.get("/cities/{slug}/population-structure")
-async def city_population_structure(slug: str, request: Request) -> dict:
-    """Altersaufbau der Stadt als Zeitreihe (Wegweiser Kommune, CC0).
-
-    110 Indikatoren zum Ist-Zustand der Bevölkerung: Zahl und Anteil je
-    Altersgruppe (von 0-2 bis ab 80), getrennt nach Geschlecht, nach
-    Generationen, dazu Altenquotient und Jugendquotient. Ist-Daten ab 2006,
-    Prognosewerte bis 2040.
-
-    HINWEIS zur Größe: ungefiltert wiegt die Antwort rund 90 KB. Für einen
-    einzelnen Stand lohnt ``?from=2023&to=2023``, für einen Verlauf reicht meist
-    ein Ausschnitt wie ``?from=2015``.
-    """
-    return await _wegweiser_dataset(slug, "population-structure", request)
-
-
-@router.get("/cities/{slug}/population-trend")
-async def city_population_trend(slug: str, request: Request) -> dict:
-    """Veränderung des Altersaufbaus als Zeitreihe (Wegweiser Kommune, CC0).
-
-    70 Indikatoren zur Bewegung statt zum Bestand: Entwicklung der Altersgruppen
-    (absolut und seit 2011, auch nach Geschlecht), Geburten- und Sterberate,
-    Wanderungssaldo, Gesamtbevölkerungsentwicklung. Ergänzt
-    ``population-structure`` um die Frage, wohin sich die Stadt bewegt.
-    """
-    return await _wegweiser_dataset(slug, "population-trend", request)
-
-
-@router.get("/cities/{slug}/municipal-finance")
-async def city_municipal_finance(slug: str, request: Request) -> dict:
-    """Kommunale Finanzkennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
-
-    30 Indikatoren: Hebesätze für Gewerbe- und Grundsteuer, Steuereinnahmekraft,
-    kommunale Schulden, Investitionen, Personal- und Sozialausgaben je
-    Einwohner. Jahreswerte ab 2006.
-
-    ABGRENZUNG: ``tax-rates`` (Regionalstatistik) bleibt die aktuellere Quelle
-    für die reinen Hebesätze (Stichtag 2024-12-31 gegen 2023 hier). Diese
-    Datenart liefert dafür die HISTORIE und den finanziellen Gesamtzusammenhang.
-    """
-    return await _wegweiser_dataset(slug, "municipal-finance", request)
-
-
-@router.get("/cities/{slug}/labour-market")
-async def city_labour_market(slug: str, request: Request) -> dict:
-    """Arbeitsmarkt und Pendlerverflechtung als Zeitreihe (Wegweiser, CC0).
-
-    40 Indikatoren: Arbeitslosenquoten (gesamt, Jugendliche, Langzeit,
-    Ausländer), Beschäftigungsquoten nach Alter und Geschlecht, geringfügige
-    Beschäftigung, Hochqualifizierte, Ein- und Auspendler.
-
-    ABGRENZUNG: ``unemployment`` (GENESIS, Berichtsjahr 2025) bleibt die
-    aktuellere Quelle für die reine Arbeitslosenzahl, ``indicators``
-    (INKAR/BBSR) führt eigene Kennzahlen mit anderer Methodik. Hier steht der
-    Verlauf ab 2006.
-    """
-    return await _wegweiser_dataset(slug, "labour-market", request)
-
-
-@router.get("/cities/{slug}/integration")
-async def city_integration(slug: str, request: Request) -> dict:
-    """Integrationskennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
-
-    26 Indikatoren zur Lage von Menschen mit ausländischer Staatsangehörigkeit
-    und Migrationshintergrund: Bevölkerungsanteile, Beschäftigung,
-    Arbeitslosigkeit, Kinderbetreuung, Schulabschlüsse, Einbürgerungen.
-    Jahreswerte ab 2006.
-    """
-    return await _wegweiser_dataset(slug, "integration", request)
-
-
-@router.get("/cities/{slug}/childcare")
-async def city_childcare(slug: str, request: Request) -> dict:
-    """Kinderbetreuung als Zeitreihe (Wegweiser Kommune, CC0).
-
-    20 Indikatoren: Betreuungsquoten für unter Dreijährige, 3- bis 5-Jährige und
-    Schulkinder, getrennt nach Tageseinrichtung und Tagespflege sowie nach
-    Betreuungsumfang (bis 25 h, 25 bis 35 h, mehr als 35 h), dazu Kinder mit
-    Migrationshintergrund in Tageseinrichtungen. Jahreswerte ab 2006.
-
-    Teilabdeckung: 83 der 84 Städte (Reutlingen fehlt in der Quelle).
-    """
-    return await _wegweiser_dataset(slug, "childcare", request)
-
-
-@router.get("/cities/{slug}/education-stats")
-async def city_education_stats(slug: str, request: Request) -> dict:
-    """Bildungsstatistik als Zeitreihe (Wegweiser Kommune, CC0).
-
-    33 Indikatoren: Schulabgänger nach Abschlussart (ohne Abschluss bis
-    Hochschulreife), Übergangsquoten, Auszubildende, Ausbildungsplätze,
-    Weiterbildungsbeteiligung. Jahreswerte ab 2006.
-
-    NICHT zu verwechseln mit ``education``: dort liegen OSM-Schulstandorte als
-    POIs mit Koordinaten, hier die amtliche Statistik.
-
-    Teilabdeckung: 70 Städte. Die 14 kreisangehörigen Städte (Hannover, Aachen,
-    Göttingen, ...) fehlen, weil die Quelle Bildungsdaten erst ab Kreisebene
-    führt.
-    """
-    return await _wegweiser_dataset(slug, "education-stats", request)
-
-
-@router.get("/cities/{slug}/social-situation")
-async def city_social_situation(slug: str, request: Request) -> dict:
-    """Soziale Lage als Zeitreihe (Wegweiser Kommune, CC0).
-
-    17 Indikatoren: SGB-II-Quoten (gesamt, Kinder, Ältere), Altersarmut,
-    Grundsicherung, Wohngeld, Schuldnerquote, Einkommensverteilung.
-    Jahreswerte ab 2006.
-    """
-    return await _wegweiser_dataset(slug, "social-situation", request)
-
-
-@router.get("/cities/{slug}/care")
-async def city_care(slug: str, request: Request) -> dict:
-    """Pflegekennzahlen als Zeitreihe (Wegweiser Kommune, CC0).
-
-    11 Indikatoren: Pflegebedürftige je Altersgruppe, Pflegequote, Verteilung
-    auf ambulante und stationäre Pflege sowie Pflegegeld, dazu die
-    Pflegevorausberechnung bis 2030. Jahreswerte ab 2006.
-
-    Teilabdeckung: 73 Städte, die übrigen führt die Quelle erst ab Kreisebene.
-    """
-    return await _wegweiser_dataset(slug, "care", request)
-
-
 @router.get("/cities/{slug}/land-values")
 async def city_land_values(slug: str, request: Request) -> dict:
     """Liefert die aggregierten amtlichen Bodenrichtwerte je Stadt (DATA-35).
 
-    Ablauf wie ``city_indicators`` (Store-read, KEIN resilient_client): Register-
+    Ablauf wie ``city_public_tenders`` (Store-read, KEIN resilient_client): Register-
     Lookup (unbekannt -> 404), Toggle-Prüfung (aus -> 200 disabled), Coverage-
     Prüfung (BORIS ist pro Bundesland föderiert -> Stadt ohne Landes-WFS liefert
     ehrlich ``not_covered`` statt leerem ``ok``), parametrisierter Read über
@@ -4641,197 +3190,6 @@ async def city_land_values(slug: str, request: Request) -> dict:
         wikidata_qid=entry.qid,
     )
     await append_record(record, source="boris")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-def _regio_configured() -> bool:
-    """True, wenn Toggle an UND beide GENESIS-Credentials gesetzt sind (DATA-37).
-
-    Anders als die keylosen Bulk-Quellen (INKAR/BORIS) verlangt der GENESIS-
-    Webservice eine Registrierung; ohne ``regio_user``/``regio_pass`` könnte der
-    Bulk-Datensatz nie ingestet werden -> die Routen melden ehrlich ``disabled``.
-    """
-    s = Settings()
-    # SecretStr-Objekte sind immer truthy -> den eigentlichen Wert prüfen, damit
-    # ein leer gesetzter Key (regioUser="") als "fehlt" gilt.
-    user = s.regio_user.get_secret_value() if s.regio_user else None
-    pw = s.regio_pass.get_secret_value() if s.regio_pass else None
-    return bool(s.enable_regionalstatistik and user and pw)
-
-
-@router.get("/cities/{slug}/tax-rates")
-async def city_tax_rates(slug: str, request: Request) -> dict:
-    """Liefert die Realsteuer-Hebesätze einer Stadt im Envelope (DATA-37, 71231).
-
-    Ablauf wie ``city_indicators`` (Store-read, KEIN resilient_client): Register-
-    Lookup (unbekannt -> 404), Konfig-Prüfung (Toggle aus ODER keine GENESIS-
-    Credentials -> 200 disabled), parametrisierter Read über ``read_tax_rates``
-    (je 8-stelligem Gemeindeschlüssel). Drei ``source_status``:
-    - ``disabled``: ``enable_regionalstatistik`` aus ODER regio_user/pass fehlt
-    - ``not_ingested``: kein Snapshot für die Gemeinde -> data None, kein 5xx
-    - ``ok``: gemappte Hebesatz-Kennzahl (Gewerbe-/Grundsteuer A/B/C + Stichtag)
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz; der GENESIS-Pull läuft offline als Batch.
-    """
-    entry = get_city(slug)
-
-    if not _regio_configured():
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    row = read_tax_rates(entry.slug)
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_tax_rates(
-        entry.slug,
-        row,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    # Eigener Archiv-Quellenname je Teilmetrik (analog genesis_unemployment/
-    # -tourism/-construction): tax-rates und business-registrations teilten sich
-    # sonst das tier_a/regionalstatistik-Verzeichnis, wo die Tages-Aggregation des
-    # Analysten (letzter Record je Tag gewinnt) eine der beiden Metriken
-    # systematisch verlieren würde. Getrennt -> beide sauber auswertbar.
-    await append_record(record, source="regionalstatistik_tax")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/business-registrations")
-async def city_business_registrations(slug: str, request: Request) -> dict:
-    """Liefert die Gewerbean-/-abmeldungen einer Stadt im Envelope (DATA-37, 52311).
-
-    Ablauf wie ``city_tax_rates`` (Store-read, KEIN resilient_client): Register-
-    Lookup (unbekannt -> 404), Konfig-Prüfung (Toggle aus ODER keine GENESIS-
-    Credentials -> 200 disabled), parametrisierter Read über
-    ``read_business_registrations`` (je 5-stelligem Kreisschlüssel). Drei
-    ``source_status``:
-    - ``disabled``: ``enable_regionalstatistik`` aus ODER regio_user/pass fehlt
-    - ``not_ingested``: kein Snapshot für den Kreis -> data None, kein 5xx
-    - ``ok``: gemappte Gründungsdynamik (Anmeldungen/Abmeldungen/Saldo + Jahr)
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz; der GENESIS-Pull läuft offline als Batch.
-    """
-    entry = get_city(slug)
-
-    if not _regio_configured():
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    row = read_business_registrations(entry.slug)
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_business_registrations(
-        entry.slug,
-        row,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    # Eigener Archiv-Quellenname (siehe city_tax_rates): getrennt von tax-rates,
-    # damit die Tages-Aggregation des Analysten beide Metriken behält.
-    await append_record(record, source="regionalstatistik_business")
-
-    return {
-        "data": record.model_dump(mode="json"),
-        "meta": {
-            "correlation_id": correlation_id.get(),
-            "source_status": "ok",
-        },
-    }
-
-
-@router.get("/cities/{slug}/insolvencies")
-async def city_insolvencies(slug: str, request: Request) -> dict:
-    """Liefert die beantragten Insolvenzen einer Stadt im Envelope (DATA-37, 52411).
-
-    Ablauf wie ``city_business_registrations`` (Store-read, KEIN resilient_client):
-    Register-Lookup (unbekannt -> 404), Konfig-Prüfung (Toggle aus ODER keine
-    GENESIS-Credentials -> 200 disabled), parametrisierter Read über
-    ``read_insolvencies`` (je 5-stelligem Kreisschlüssel; Tabelle 52411-02 ISV006
-    Unternehmen + 52411-03 ISV007 übrige Schuldner, in einen Record gemergt).
-    Drei ``source_status``:
-    - ``disabled``: ``enable_regionalstatistik`` aus ODER regio_user/pass fehlt
-    - ``not_ingested``: kein Snapshot für den Kreis -> data None, kein 5xx
-    - ``ok``: gemappte Insolvenzlage (Unternehmens- + übrige-Schuldner-
-      Insolvenzen, letztere inkl. Verbraucher/ehem. Selbstständige, + Jahr)
-
-    KRITISCH (kein Bulk-Upstream im Request-Pfad): liest AUSSCHLIESSLICH aus dem
-    vorverarbeiteten Datensatz; der GENESIS-Pull läuft offline als Batch.
-    """
-    entry = get_city(slug)
-
-    if not _regio_configured():
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "disabled",
-            },
-        }
-
-    row = read_insolvencies(entry.slug)
-    if row is None:
-        return {
-            "data": None,
-            "meta": {
-                "correlation_id": correlation_id.get(),
-                "source_status": "not_ingested",
-            },
-        }
-
-    record = map_insolvencies(
-        entry.slug,
-        row,
-        retrieved_at=datetime.now(UTC),
-        ags=entry.ags,
-        wikidata_qid=entry.qid,
-    )
-    # Eigener Archiv-Quellenname (siehe city_tax_rates / city_business_registrations):
-    # getrennt von tax-rates und business, sonst verliert die Tages-Aggregation des
-    # Analysten (letzter Record je Tag gewinnt) eine der Regionalstatistik-Metriken.
-    await append_record(record, source="regionalstatistik_insolvency")
 
     return {
         "data": record.model_dump(mode="json"),
@@ -5901,7 +4259,7 @@ def _tender_since_param(raw: str | None) -> str | None:
 async def city_public_tenders(slug: str, request: Request) -> dict:
     """Liefert öffentliche Auftragsvergaben EINER Stadt (TENDER-01/05, CC0/Tier A).
 
-    Ablauf (analog ``city_energy``, API-01, GOV-02/03): Register-Lookup
+    Ablauf (analog ``city_land_values``, API-01, GOV-02/03): Register-Lookup
     (unbekannter Slug -> 404 über den zentralen Handler), Quellen-Toggle-Prüfung
     (deaktiviert -> 200 ``source_status=disabled``, nie 5xx), Query-Validierung
     (status/match gegen Allowlist, sonst 422; limit/offset int + Cap), dann ein
@@ -6137,11 +4495,60 @@ async def all_public_tenders(request: Request) -> dict:
 
 
 # --- council-papers (Quick 260708-tsv, kommunale Ratsinformationen, OParl) ----
+#
+# LIVE-Umstellung (Cleanup 260925): frueher las diese Route aus einem Batch-
+# Ingest-Store (archive.council_db), dessen Ingest-Code nie Teil dieses Repos
+# war. Jetzt ruft sie den echten OParl-Adapter (adapters.oparl.fetch_papers)
+# PRO REQUEST auf und cached das Ergebnis ueber die resiliente Fassade (wie
+# jede andere echte Live-Quelle). Ein "modified_since"-Cursor macht nur in
+# einem Batch-Ingest Sinn (inkrementeller Sync ueber Tage); im Request-Pfad
+# gibt es keinen Cursor-Speicher, deshalb zieht der Fetch stattdessen die
+# ERSTEN ``_COUNCIL_MAX_PAGES`` Seiten der Papers-Liste jedes OParl-Systems
+# (ungefiltert, damit der Cache-Key stadt-scharf bleibt) und wendet q/
+# paper_type/since als In-Memory-Filter auf das Ergebnis an. ``total`` zaehlt
+# nur innerhalb dieses gezogenen Fensters (keine vollstaendige Fernbestands-
+# Zaehlung mehr moeglich, da NIE die komplette Historie gezogen wird).
 
 # Pagination-Cap der council-papers-Route (eigene Konstanten, kleiner als tenders,
 # weil einzelne Paper-Objekte grösser sind). Best-Practice #8.
 _COUNCIL_LIMIT_DEFAULT = 50
 _COUNCIL_LIMIT_MAX = 100
+
+# Deckel der pro Request live gezogenen OParl-Listen-Seiten (T-08-DEP-Ersatz):
+# ein Batch-Ingest konnte sich durch tausende Seiten arbeiten (Koeln ~950); ein
+# Request-Pfad-Aufruf muss dagegen in vertretbarer Zeit antworten. Klein genug
+# fuer echte Latenz, gross genug fuer eine sinnvolle Trefferzahl je Stadt.
+_COUNCIL_MAX_PAGES = 3
+
+
+def _council_paper_matches(
+    row: dict,
+    *,
+    q: str | None,
+    paper_type: str | None,
+    since: str | None,
+) -> bool:
+    """Wendet q/paper_type/since als In-Memory-Filter auf ein Mapper-row-dict an.
+
+    Ersetzt die frueheren SQL-WHERE-Bedingungen von ``archive.council_db`` (nie
+    Teil dieses Repos): ``q`` ist ein case-insensitiver Substring auf Name/
+    Reference, ``paper_type`` ein case-insensitives Exact-Match, ``since`` ein
+    String-Vergleich (ISO-Datum) gegen ``created`` (Fallback ``date``).
+    """
+    row_paper_type = (row.get("paper_type") or "").lower()
+    if paper_type is not None and row_paper_type != paper_type.lower():
+        return False
+    if q:
+        haystack = " ".join(
+            filter(None, [row.get("name"), row.get("reference")])
+        ).lower()
+        if q.lower() not in haystack:
+            return False
+    if since is not None:
+        date_val = row.get("created") or row.get("date")
+        if not date_val or date_val < since:
+            return False
+    return True
 
 
 @router.get("/cities/{slug}/council-papers")
@@ -6153,7 +4560,7 @@ _COUNCIL_LIMIT_MAX = 100
 # bleibt voll funktionsfaehig (Test test_council_papers_alias).
 @router.get("/cities/{slug}/council/papers", include_in_schema=False)
 async def city_council_papers(slug: str, request: Request) -> dict:
-    """Liefert kommunale Ratsinformationen EINER Stadt (council-papers, OParl).
+    """Liefert kommunale Ratsinformationen EINER Stadt live (council-papers, OParl).
 
     Schwester-Route zu ``city_public_tenders``: was die Stadt ENTSCHEIDET (Vorlagen,
     Anträge, Beschlüsse), analog zu was die Stadt EINKAUFT. Unter ZWEI Pfaden
@@ -6161,24 +4568,28 @@ async def city_council_papers(slug: str, request: Request) -> dict:
     MCP-/Katalog-/Coverage-Key) und ``/cities/{slug}/council/papers`` (Alias für
     menschliche/GPT-Nutzung).
 
+    GENUINELY LIVE (Cleanup 260925, kein Batch-Ingest mehr): ruft
+    ``adapters.oparl.fetch_papers`` direkt gegen das OParl-System der Stadt auf
+    (bis zu ``_COUNCIL_MAX_PAGES`` Seiten), gecached über die resiliente Fassade
+    (Cache/SWR/Breaker) wie jede andere Live-Quelle.
+
     Ablauf:
     1. ``get_city(slug)`` (unbekannter Slug -> zentraler 404-Handler).
     2. Coverage-Guard: Stadt NICHT in ``COVERED_COUNCIL_CITIES`` -> 404 mit Hint
        (nur die acht lizenzgeklärten Städte sind abgedeckt).
     3. ``enable_council`` aus -> 200 ``source_status="disabled"``, data None.
-    4. Query-Validierung: ``q`` frei (im Reader ?-gebunden), ``since`` ISO-Datum,
-       ``paper_type`` frei/optional, ``limit`` (Default 50, Cap 100) / ``offset``.
-    5. ``read_council_papers`` (read-only Store, NIE Live-OParl im Request-Pfad).
-       Leer -> 200 ``source_status="no_data"``.
+    4. Resilienter Live-Fetch (``adapters.oparl.fetch_papers``, gecached je Stadt,
+       KEINE Query-Parameter im Cache-Key). Toter Upstream ohne Cache -> 503 mit
+       selbst-korrigierendem Hint.
+    5. Query-Validierung + In-Memory-Filterung: ``q`` (Substring Name/Reference),
+       ``since`` (ISO-Datum gegen ``created``/``date``), ``paper_type`` (Exact-
+       Match), ``limit`` (Default 50, Cap 100) / ``offset``.
     6. Treffer -> ``{data:{papers, count, total, attribution}, meta:{...}}`` mit
        per-Stadt-Attribution aus ``COUNCIL_CITY_LICENSE``. ``count`` ist die
-       Seitenlänge, ``total`` der Gesamtbestand zu den aktiven Filtern (gleiche
-       ?-gebundene Bedingungen, ``count_council_papers``), damit Clients den
-       Bestand kennen, ohne bis zur leeren Seite zu blättern.
+       Seitenlänge, ``total`` der Treffer-Gesamtbestand INNERHALB des gezogenen
+       Live-Fensters (NICHT mehr der volle Fernbestand, s. Moduldocstring oben).
 
-    Read-only (wie public-tenders): der Batch-Ingest (``ingest.oparl``) zieht die
-    OParl-Paper offline; die Route liest ausschliesslich aus dem Store. PDFs sind
-    NUR als ``main_file_url``-Link enthalten (nie gespiegelt).
+    PDFs sind NUR als ``main_file_url``-Link enthalten (nie gespiegelt).
     """
     entry = get_city(slug)
 
@@ -6196,7 +4607,7 @@ async def city_council_papers(slug: str, request: Request) -> dict:
         )
 
     # Quellen-Toggle frisch lesen (Settings() statt app.state, damit der per-Test
-    # gesetzte Env-Override greift). Default-off: aus -> 200 disabled.
+    # gesetzte Env-Override greift). Default-on (genuinely live seit 260925).
     s = Settings()
     if not s.enable_council:
         return {
@@ -6207,8 +4618,28 @@ async def city_council_papers(slug: str, request: Request) -> dict:
             },
         }
 
-    # Query-Validierung VOR der Store-Lesung (T-INPUT): q/paper_type frei (im Reader
-    # ?-gebunden), since strikt ISO-Datum (sonst 422), limit/offset int + Cap.
+    # Resilienter Live-Fetch (Cache/SWR/Single-Flight/Breaker), Cache-Key NUR
+    # nach Stadt (keine Query-Parameter): so profitieren alle q/since/paper_type-
+    # Varianten vom selben Cache-Eintrag; die Filter laufen danach in Python.
+    client = request.app.state.resilient_client
+    key = build_cache_key("council", city_slug=entry.slug)
+
+    async def fetch_fn():
+        return await fetch_papers(
+            request.app.state.http, entry.slug, max_pages=_COUNCIL_MAX_PAGES
+        )
+
+    raw_papers, status = await client.fetch("council", key, fetch_fn)
+
+    if raw_papers is None:
+        raise UpstreamError(
+            "Quelle 'council' voruebergehend nicht erreichbar, kein gecachter "
+            "Wert vorhanden.",
+            hint="Erneut versuchen oder GET /api/v1/health fuer Quellen-Status.",
+        )
+
+    # Query-Validierung VOR der Filterung (T-INPUT): q/paper_type frei, since
+    # strikt ISO-Datum (sonst 422), limit/offset int + Cap.
     q_filter = request.query_params.get("q")
     paper_type_filter = request.query_params.get("paper_type")
     since_filter = _tender_since_param(request.query_params.get("since"))
@@ -6228,14 +4659,18 @@ async def city_council_papers(slug: str, request: Request) -> dict:
         maximum=2_000_000_000,
     )
 
-    rows = read_council_papers(
-        entry.slug,
-        q=q_filter,
-        since=since_filter,
-        paper_type=paper_type_filter,
-        limit=limit,
-        offset=offset,
-    )
+    ingested_at = datetime.now(UTC).isoformat()
+    all_rows = [
+        map_council_paper(paper, city_slug=entry.slug, ingested_at=ingested_at)
+        for paper in raw_papers
+    ]
+    rows = [
+        row
+        for row in all_rows
+        if _council_paper_matches(
+            row, q=q_filter, paper_type=paper_type_filter, since=since_filter
+        )
+    ]
 
     if not rows:
         return {
@@ -6246,21 +4681,14 @@ async def city_council_papers(slug: str, request: Request) -> dict:
             },
         }
 
-    # Gesamtbestand zu den aktiven Filtern (gleiche ?-gebundene Bedingungen wie
-    # die Lese-Query): Clients sollen den Bestand kennen, ohne bis zur leeren
-    # Seite zu blättern.
-    total = count_council_papers(
-        entry.slug,
-        q=q_filter,
-        since=since_filter,
-        paper_type=paper_type_filter,
-    )
+    total = len(rows)
+    page = rows[offset : offset + limit]
 
     lic = COUNCIL_CITY_LICENSE[entry.slug]
     return {
         "data": {
-            "papers": rows,
-            "count": len(rows),
+            "papers": page,
+            "count": len(page),
             "total": total,
             "license_id": lic["license_id"],
             "license_tier": "A",
@@ -6274,5 +4702,6 @@ async def city_council_papers(slug: str, request: Request) -> dict:
         "meta": {
             "correlation_id": correlation_id.get(),
             "source_status": "ok",
+            "cache_status": status,
         },
     }

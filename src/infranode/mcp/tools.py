@@ -75,15 +75,14 @@ _Slug = Annotated[
     ),
 ]
 
-# Alle per get_city_resource abrufbaren Datenarten = die City-Allowlist OHNE
-# ``pois`` (braucht den Pflichtparameter ``type`` und hat deshalb ein eigenes
-# Tool). ``base``/``overview``/``weather``/``air-uba`` haben zwar ebenfalls
-# namentliche Tools, bleiben hier aber absichtlich drin: so gilt fuer JEDEN
-# Katalog-Schluessel ohne Ausnahme "get_city_resource(slug, <type>) liefert
-# ihn", und das Enum spiegelt den Katalog 1:1. Als Literal annotiert, damit
-# FastMCP ein ``enum`` im inputSchema emittiert (maschinenlesbare Discovery)
-# und Pydantic ungueltige Werte schon vor dem Request abweist.
-GENERIC_RESOURCES: tuple[str, ...] = tuple(sorted(client.ALLOWED_RESOURCES - {"pois"}))
+# Alle per get_city_resource abrufbaren Datenarten = die komplette City-Allowlist.
+# ``base``/``overview``/``weather``/``air-uba`` haben zwar ebenfalls namentliche
+# Tools, bleiben hier aber absichtlich drin: so gilt fuer JEDEN Katalog-Schluessel
+# ohne Ausnahme "get_city_resource(slug, <type>) liefert ihn", und das Enum
+# spiegelt den Katalog 1:1. Als Literal annotiert, damit FastMCP ein ``enum`` im
+# inputSchema emittiert (maschinenlesbare Discovery) und Pydantic ungueltige
+# Werte schon vor dem Request abweist.
+GENERIC_RESOURCES: tuple[str, ...] = tuple(sorted(client.ALLOWED_RESOURCES))
 _ResourceKey = Annotated[
     # pyright kennt kein dynamisches Literal[<tuple>]; das Enum MUSS aber aus der
     # Allowlist abgeleitet bleiben (eine Quelle der Wahrheit), Pydantic/FastMCP
@@ -92,8 +91,8 @@ _ResourceKey = Annotated[
     Field(
         description=(
             "Data type key to fetch, exactly as listed by get_city_overview / the "
-            "atlas://catalog resource (the 'type' field), e.g. 'charging', "
-            "'parking', 'demographics', 'solar', 'district-heating'."
+            "atlas://catalog resource (the 'type' field), e.g. 'parking', "
+            "'demographics', 'solar', 'sharing'."
         )
     ),
 ]
@@ -113,10 +112,10 @@ async def get_city_overview(slug: _Slug) -> ToolEnvelope:
     """Get a ONE-CALL overview of everything Atlas knows about a German city.
 
     Start here for any city question. Returns: the city's base data, a CATALOG of
-    all ~60 available data types (weather, air quality, public transit, trains,
-    traffic, charging, parking, solar, energy, demographics, taxes, accidents,
-    tourism, heritage, trees, population density, playgrounds, post boxes and many
-    more), each with its coverage status and the exact tool to call next (for most
+    all ~60 available data types (weather, air quality, trains, traffic, parking,
+    solar, demographics, tourism, heritage, trees, population density, bike
+    counts and many more), each with its coverage status and the exact tool to
+    call next (for most
     data types that is ``get_city_resource(slug, resource=<type>)``), plus a small
     live highlights snapshot (current weather, air quality and train departures).
     Data types not yet covered for this city show where they ARE available so you
@@ -133,18 +132,13 @@ async def get_city_resource(
 ) -> ToolEnvelope:
     """Fetch ANY per-city data type by its key (generic accessor, ~60 data types).
 
-    One tool for the whole breadth of Atlas: live data (air, traffic, transit
-    stops, parking, charging, water-level, flood, sharing, fuel-prices,
-    webcams, station-departures/-arrivals/stations, ...), statistics
-    (demographics, unemployment, tourism, accidents, crime-stats, indicators,
-    land-values, tax-rates, insolvencies, ...), multi-year TIME SERIES
-    (``sustainability``: SDG indicators per municipality, one value per year from
-    2006 to 2023, so trends can be answered without stitching snapshots),
-    infrastructure and environment
-    (solar, solar-roofs, district-heating, energy, heritage, tree-cadastre,
-    playgrounds, public-toilets, markets, education, ...) and more. Discover the
-    valid keys and per-city coverage with ``get_city_overview(slug)`` or the
-    ``atlas://catalog`` resource; the ``resource`` enum lists every key.
+    One tool for the whole breadth of Atlas: live data (air, traffic, water-level,
+    flood, sharing, fuel-prices, webcams, station-departures/-arrivals/stations,
+    ...), statistics (demographics, unemployment, tourism, construction,
+    land-values, public-tenders, ...), infrastructure and environment (solar,
+    heritage, tree-cadastre, population-density, bike-counts, ...) and more.
+    Discover the valid keys and per-city coverage with ``get_city_overview(slug)``
+    or the ``atlas://catalog`` resource; the ``resource`` enum lists every key.
     Uncovered types return ``source_status="not_covered"`` (plus where they ARE
     available), never an error. Read-only.
     """
@@ -171,27 +165,6 @@ async def weather(slug: _Slug) -> ToolEnvelope:
     live weather highlight.
     """
     return await client.get_resource(slug, "weather")
-
-
-async def pois(
-    slug: _Slug,
-    # A002 unterdrueckt: der Parametername IST der oeffentliche MCP-Tool-
-    # Parameter ("type" im Tool-Schema), Umbenennung braeche den Tool-Vertrag.
-    type: Annotated[  # noqa: A002
-        str,
-        Field(
-            description=(
-                "POI type from the API allowlist, one of: hospital, school, "
-                "pharmacy, restaurant, police, kindergarten."
-            )
-        ),
-    ],
-) -> ToolEnvelope:
-    """Get points of interest in a German city, filtered by type.
-
-    Sourced from OpenStreetMap. Read-only.
-    """
-    return await client.get_resource(slug, "pois", params={"type": type})
 
 
 async def station_board_departures(
@@ -240,25 +213,21 @@ async def transit_departures(
         str | None,
         Field(
             description=(
-                "Required stop ID to fetch departures for. Discover a city's stop "
-                "IDs with get_city_resource(slug, resource='transit') first (each "
-                "stop carries its id). Format: DELFI 'de:<AGS>:<id>' or a numeric "
-                "gtfs.de stop id. NOTE: this is NOT the trip_stop_id (nor its "
-                "deprecated alias stop_id) from station_departures/"
-                "station_arrivals, whose value identifies one stop of one train "
-                "run (e.g. '-1203677609210685804-2607251113-13'); passing it "
-                "returns no_data with a corrective note instead of departures."
+                "Required stop ID to fetch departures for. Format: DELFI "
+                "'de:<AGS>:<id>' or a numeric gtfs.de stop id. NOTE: this is NOT "
+                "the trip_stop_id (nor its deprecated alias stop_id) from "
+                "station_departures/station_arrivals, whose value identifies one "
+                "stop of one train run (e.g. "
+                "'-1203677609210685804-2607251113-13'); passing it returns "
+                "no_data with a corrective note instead of departures."
             )
         ),
     ] = None,
 ) -> ToolEnvelope:
     """Get live public-transport departures with real-time delays for a stop.
 
-    Sourced from GTFS-RT/HVV/VGN. Unlike the static stop list
-    (``get_city_resource(slug, resource='transit')``), this returns minute-fresh
-    departures including delay for ONE stop. A ``stop_id`` is required: fetch the
-    city's transit stops first to discover valid stop IDs, then pass one here.
-    Read-only.
+    Sourced from GTFS-RT/HVV/VGN: minute-fresh departures including delay for
+    ONE stop. A ``stop_id`` is required. Read-only.
     """
     if not stop_id:
         # Ohne stop_id kann die Live-Quelle keine Abfahrten liefern. Statt eines
@@ -267,11 +236,7 @@ async def transit_departures(
             "data": None,
             "meta": {
                 "source_status": "no_data",
-                "note": (
-                    "Provide a stop_id to get live departures. Discover valid stop "
-                    "IDs for this city with get_city_resource(slug, "
-                    "resource='transit'), then call again."
-                ),
+                "note": "Provide a stop_id to get live departures.",
             },
         }
     if _TRIP_STOP_ID_RE.match(stop_id):
@@ -288,8 +253,7 @@ async def transit_departures(
                     "(station_departures/station_arrivals): it identifies ONE "
                     "STOP OF ONE TRAIN RUN, not a station. This tool needs a "
                     "stop ID in the DELFI pattern 'de:<AGS>:<id>' or a numeric "
-                    "gtfs.de stop id. Get one from get_city_resource(slug, "
-                    "resource='transit') (field stop_id), then call again."
+                    "gtfs.de stop id."
                 ),
             },
         }
@@ -326,11 +290,10 @@ async def compare(
         Field(
             description=(
                 "Resource to compare. Supported: 'weather' (DWD), 'air' (UBA "
-                "air quality), 'indicators' (INKAR socioeconomic indicators "
-                "incl. unemployment rate and EV charging coverage), "
-                "'demographics', 'unemployment', 'tourism', 'charging-status' "
-                "(live EV charging occupancy, aggregates only) and "
-                "'weather-warnings' (official DWD warning level per city)."
+                "air quality), 'demographics', 'unemployment', 'tourism', "
+                "'charging-status' (live EV charging occupancy, aggregates "
+                "only) and 'weather-warnings' (official DWD warning level "
+                "per city)."
             )
         ),
     ],

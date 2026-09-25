@@ -85,28 +85,33 @@ SMARD, BORIS, Bundesnetzagentur, KBA, OpenStreetMap, GovData.
 
 ## Lokal laufen lassen
 
+REST-API direkt (kein Docker nötig):
+
 ```bash
 cp .env.example .env
-docker compose -f deploy/docker-compose.yml up
-curl http://localhost/api/v1/health
+uv sync
+uv run uvicorn infranode.main:app --reload
+curl http://localhost:8000/api/v1/health
 ```
 
-MCP-Server gegen die lokale API starten:
+MCP-Server (Rust, [rust/atlas-mcp](./rust/atlas-mcp)) gegen die lokale API:
 
 ```bash
-uv sync --group mcp
-mcpApiBase=http://localhost/api/v1 uv run python -m infranode.mcp.server
+cd rust/atlas-mcp
+npx wrangler dev   # ATLAS_API_BASE in wrangler.toml auf http://localhost:8000/api/v1 setzen
 ```
 
-Alle Einstellungen sind einfache camelCase-Variablen ohne Prefix (siehe
-`.env.example`). Echte Secrets landen nie im Repo, versioniert ist nur
+Alle Einstellungen der REST-API sind einfache camelCase-Variablen ohne Prefix
+(siehe `.env.example`). Echte Secrets landen nie im Repo, versioniert ist nur
 `.env.example`.
 
 ## Status
 
-Der MCP-Server wird gerade von Python nach Go migriert; die REST-API bleibt
-vorerst Python. Bis zum Cutover laufen beide nebeneinander, ohne dass sich am
-öffentlichen MCP-Interface etwas ändert.
+Der MCP-Server ist fertig auf **Rust + Cloudflare Workers** umgestellt
+([rust/atlas-mcp](./rust/atlas-mcp)) — kostenlose Stufe, kein Docker/VPS.
+Die REST-API läuft vorerst weiter als Python-Prozess; ihre Migration auf
+Cloudflare (KV statt Redis, D1 statt der lokalen Stores) ist geplant, aber
+noch nicht begonnen.
 
 ## Lizenz
 

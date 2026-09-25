@@ -87,28 +87,32 @@ OpenStreetMap, GovData.
 
 ## Running it locally
 
+REST API directly (no Docker needed):
+
 ```bash
 cp .env.example .env
-docker compose -f deploy/docker-compose.yml up
-curl http://localhost/api/v1/health
+uv sync
+uv run uvicorn infranode.main:app --reload
+curl http://localhost:8000/api/v1/health
 ```
 
-Run the MCP server against the local API:
+MCP server (Rust, [rust/atlas-mcp](./rust/atlas-mcp)) against the local API:
 
 ```bash
-uv sync --group mcp
-mcpApiBase=http://localhost/api/v1 uv run python -m infranode.mcp.server
+cd rust/atlas-mcp
+npx wrangler dev   # set ATLAS_API_BASE in wrangler.toml to http://localhost:8000/api/v1
 ```
 
-All settings are plain camelCase variables with no prefix (see
+All REST API settings are plain camelCase variables with no prefix (see
 `.env.example`). Real secrets never go in the repo; only `.env.example` is
 committed.
 
 ## Status
 
-The MCP server is currently being migrated from Python to Go; the REST API
-stays Python for now. Both run side by side until cutover, with no change
-to the public MCP interface.
+The MCP server has been fully moved to **Rust on Cloudflare Workers**
+([rust/atlas-mcp](./rust/atlas-mcp)) — free tier, no Docker/VPS. The REST API
+still runs as a Python process for now; moving it to Cloudflare too (KV
+instead of Redis, D1 instead of the local stores) is planned but not started.
 
 ## License
 

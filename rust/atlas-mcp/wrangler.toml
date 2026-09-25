@@ -1,0 +1,20 @@
+name = "atlas-mcp"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-09-25"
+
+[build]
+command = "cargo install \"worker-build@^0.8\" && worker-build --release"
+
+[vars]
+# Base URL of the internal Atlas REST API this Worker calls. Overridden per
+# environment (see [env.*.vars] below or `wrangler secret put`/dashboard vars).
+ATLAS_API_BASE = "http://localhost:8000/api/v1"
+
+# Native Workers Rate Limiting binding (free, no KV round-trip needed): caps
+# each client IP at 480 requests per 60s window on the public /mcp endpoint.
+# Binding name must match ratelimit.rs's `BINDING` constant.
+[[unsafe.bindings]]
+name = "MCP_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 480, period = 60 }

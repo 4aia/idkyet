@@ -5,95 +5,11 @@
 # Origin-Cert sauber, sodass Cloudflare auf "Full (strict)" gestellt werden kann.
 # Caddy bleibt der EINZIGE Ingress; die api ist nur intern via expose:8000 erreichbar.
 
-# Site-Block-Adresse aus der Umgebung (Caddy-Env-Substitution). Wird zur Validierungs-
-# UND Laufzeit aufgeloest, daher beim `caddy validate` INFRANODE_PUBLIC_DOMAIN setzen.
-{$INFRANODE_PUBLIC_DOMAIN} {
-	encode zstd gzip
-
-	tls {
-		# DNS-01-Challenge via Cloudflare-API-Token (Zone.Zone:Read + Zone.DNS:Edit).
-		# Token kommt aus der Umgebung (env_file), NIE im Caddyfile hartkodiert.
-		dns cloudflare {env.INFRANODE_CF_DNS_TOKEN}
-		resolvers 1.1.1.1
-	}
-
-	# /admin ist ueber die OEFFENTLICHE Domain NIE erreichbar (Audit HIGH-1,
-	# 2026-06-10): das Dashboard laeuft ausschliesslich uebers Tailnet
-	# (tailscale serve -> 127.0.0.1:8001, s. docs/DEPLOYMENT.md Abschnitt 10).
-	@admin path /admin /admin/*
-	handle @admin {
-		respond "Not Found" 404
-	}
-
-	# /api/v1: 1:1-Proxy auf den internen api-Service. Header fuer die reine
-	# JSON-API (bewusst KEINE CSP: keine HTML/JS-Auslieferung auf diesem Pfad).
-	@api path /api/v1 /api/v1/*
-	handle @api {
-		header {
-			Strict-Transport-Security "max-age=31536000"
-			X-Content-Type-Options "nosniff"
-			Referrer-Policy "no-referrer"
-		}
-		reverse_proxy {
-			# Horizontale Skalierung (SCALING.md): dynamische Upstream-Aufloesung statt
-			# fester "api:8000"-Adresse. Caddy fragt den Docker-DNS periodisch nach ALLEN
-			# A-Records des Service "api" und verteilt round-robin ueber alle Replicas.
-			# Bei einer Instanz (Default) genau ein Upstream -> identisches Verhalten.
-			dynamic a {
-				name api
-				port 8000
-				refresh 10s
-				# NUR A-Records aufloesen: seit dem IPv6-Egress-Netz (PR #102) liefert
-				# der Docker-DNS auch AAAA, uvicorn lauscht aber nur auf IPv4 ->
-				# AAAA-Dials enden als Connection refused und Caddy antwortet 502
-				# (Vorfall 2026-07-16, intermittierende 502 auf /api/v1 ab 12:55 UTC).
-				versions ipv4
-			}
-			# Correlation-ID durchreichen, damit asgi-correlation-id sie in
-			# FastAPI uebernehmen kann (FND-03).
-			header_up X-Request-ID {http.request.header.X-Request-ID}
-			# Client-gesendetes X-Forwarded-For strippen (Audit HIGH-2): Cloudflare
-			# reicht das Angreifer-XFF durch; die App vertraut sonst dessen erstem
-			# Element als Rate-Limit-IP. CF-Connecting-IP setzt Cloudflare selbst
-			# verbindlich; zusammen mit der CF-only-Firewall (Runbook Pflichtschritt)
-			# ist die IP-Quelle damit vertrauenswuerdig.
-			header_up -X-Forwarded-For
-		}
-	}
-
-	# PUBLIC LAUNCH (Owner-Entscheid 2026-06-12 abends): statische Doku-Site
-	# (Astro-Build, per rsync nach /srv/docs auf dem Host, read-only in den
-	# Container gemountet). Ersetzt das fruehere BETA-GATE (404 auf alles
-	# ausserhalb /api/v1). Astro liefert eine eigene 404.html; file_server
-	# nutzt sie automatisch bei fehlenden Pfaden.
-	handle {
-		header {
-			Strict-Transport-Security "max-age=31536000"
-			X-Content-Type-Options "nosniff"
-			Referrer-Policy "no-referrer"
-			X-Frame-Options "DENY"
-			# CSP fuer die statische Astro-Site: keine externen Quellen (alles
-			# self-hosted, DSGVO-Versprechen "kein Tracking"). 'unsafe-inline'
-			# fuer script/style ist noetig, weil Astro Inline-Module emittiert.
-			# 'wasm-unsafe-eval' ist noetig fuer die Pagefind-Suche (laedt ein
-			# WebAssembly-Modul); es erlaubt NUR WASM-Kompilierung, kein eval()
-			# (anders als 'unsafe-eval'). Ohne das schlaegt die Suche still fehl.
-			# default-src 'none' + frame-ancestors 'none' bleiben die harte Linie.
-			Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
-			Permissions-Policy "geolocation=(), camera=(), microphone=()"
-		}
-		root * /srv/docs
-		file_server
-	}
-
-	# Astro-eigene 404-Seite fuer fehlende Pfade (nur Status 404; Proxy-Fehler
-	# wie 502 bleiben unveraendert). handle_errors ist Site-Block-Direktive.
-	handle_errors 404 {
-		root * /srv/docs
-		rewrite * /404.html
-		file_server
-	}
-}
+# Die nackte Root-Domain gehoert NICHT diesem Projekt (dort laeuft etwas
+# anderes) - Caddy claimt hier bewusst nur die mcp.-Subdomain und die
+# internen Ops-Subdomains unten. Die REST-API ist rein intern (nur der
+# mcp-Service spricht sie an, siehe deploy/docker-compose.yml); es gibt
+# keinen oeffentlichen /api/v1-Proxy und keine ausgelieferte Doku-Site mehr.
 
 # Uptime-Kuma Status-Page (Owner 2026-06-13): oeffentliche Stoerungs-/Status-Seite
 # fuer Devs, prominent verlinkt von /abdeckung. Eigener Subdomain-Block, damit Kuma
@@ -128,20 +44,20 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 		resolvers 1.1.1.1
 	}
 
-	# Browser-Redirect (Owner-Wunsch 2026-07-01): jemand, der mcp.<domain> oder
-	# mcp.<domain>/mcp im Browser aufruft (statt per MCP-Client zu verbinden),
-	# sah bisher nur einen rohen JSON-RPC-Fehler (406 "Client must accept
-	# text/event-stream") bzw. 404 auf der Root. Echte MCP-Clients senden nie
-	# Accept: text/html (nur application/json + text/event-stream), daher
-	# unterscheidet dieser Matcher zuverlaessig einen Menschen im Browser von
-	# einem MCP-Client und schickt nur den Menschen zur Doku-Seite weiter.
+	# Browser-Zugriff (jemand ruft mcp.<domain> oder mcp.<domain>/mcp im Browser
+	# auf statt per MCP-Client zu verbinden): kein oeffentliches Doku-Portal mehr
+	# zum Hinschicken, also eine kurze Klartext-Antwort statt eines rohen
+	# JSON-RPC-Fehlers (406 "Client must accept text/event-stream"). Echte
+	# MCP-Clients senden nie Accept: text/html (nur application/json +
+	# text/event-stream), der Matcher unterscheidet also zuverlaessig.
 	@browser {
 		header Accept *text/html*
-		# llms.txt ausnehmen: auch Browser sollen die Klartext-Datei sehen,
-		# nicht auf die Doku-Seite umgeleitet werden.
 		not path /llms.txt
 	}
-	redir @browser https://{$INFRANODE_PUBLIC_DOMAIN}/mcp/ 302
+	handle @browser {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "Atlas MCP server. Connect with an MCP client (streamable HTTP) at /mcp, e.g.: claude mcp add --transport http atlas https://{$INFRANODE_PUBLIC_DOMAIN}/mcp" 200
+	}
 
 	# Trailing-Slash-Toleranz (Directory-Review 2026-07-10): /mcp/ intern auf
 	# /mcp umschreiben, statt den 307 des Python-Servers durchzureichen.
@@ -150,23 +66,18 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 	# unberuehrt.
 	rewrite /mcp/ /mcp
 
-	# llms.txt fuer LLM-Crawler auf der MCP-Subdomain (war 404). Bewusst ohne
-	# Zahlenangaben (Datenarten/Staedte wachsen); kanonische Langfassung liegt
-	# auf der Hauptdomain und wird dort generiert.
+	# llms.txt fuer LLM-Crawler auf der MCP-Subdomain. Bewusst ohne Zahlenangaben
+	# (Datenarten/Staedte wachsen).
 	handle /llms.txt {
 		header Content-Type "text/plain; charset=utf-8"
 		respond <<LLMS
-			# InfraNode MCP Server
+			# Atlas MCP Server
 
 			> Remote MCP server (streamable HTTP) for German open data: live and
 			> archived data for the largest German cities, from licensed official
 			> sources with per-record attribution. Keyless and read-only.
 
-			Endpoint: https://mcp.infranode.dev/mcp
-
-			- Documentation: https://infranode.dev/mcp/
-			- Canonical llms.txt (all data types, cities, endpoints): https://infranode.dev/llms.txt
-			- REST API: https://infranode.dev/api/v1
+			Endpoint: https://mcp.{$INFRANODE_PUBLIC_DOMAIN}/mcp
 			LLMS 200
 	}
 

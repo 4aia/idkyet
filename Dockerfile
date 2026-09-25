@@ -1,4 +1,4 @@
-# InfraNode API - Multi-Stage uv-Build (FND-01)
+# Atlas API - Multi-Stage uv-Build (FND-01)
 # Quelle: uv Docker Guide (https://docs.astral.sh/uv/guides/integration/docker/) [CITED: STACK.md]
 # Basis: python:3.13-slim-bookworm (multi-arch; laeuft auf der Prod-Box als
 # linux/amd64, AMD EPYC-Genoa/x86_64); bewusst slim-bookworm statt musl-basierter

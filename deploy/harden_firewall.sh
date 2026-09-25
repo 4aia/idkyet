@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy/harden_firewall.sh - CF-only-Origin-Firewall fuer InfraNode (Security-Audit HIGH-2)
+# deploy/harden_firewall.sh - CF-only-Origin-Firewall fuer Atlas (Security-Audit HIGH-2)
 #
 # Beschraenkt die Origin-Ports 80/443 auf die offiziellen Cloudflare-IP-Ranges.
 # Ohne diese Beschraenkung kann jeder, der die Origin-IP kennt, Cloudflare

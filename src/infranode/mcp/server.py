@@ -1,4 +1,4 @@
-"""FastMCP-Server-Instanz des InfraNode-MCP-Servers (DX-05).
+"""FastMCP-Server-Instanz des Atlas-MCP-Servers (DX-05).
 
 Der Server registriert wenige namentliche Tools (Einstieg/Meta/parametrisiert)
 plus ein generisches ``get_city_resource`` fuer alle uebrigen Datenarten
@@ -12,10 +12,10 @@ Es gibt KEINE Mapping-/Lizenz-Logik im Server: jedes Tool ruft über
 ``infranode.mcp.client.get_resource`` die Live-FastAPI und gibt deren
 normalisiertes JSON 1:1 zurück (D-07/D-08). Zwei Transporte:
 - stdio (Default): lokaler Subprozess für Claude Desktop/Code.
-- streamable-http: öffentlicher Remote-Endpunkt (z.B. mcp.infranode.dev),
+- streamable-http: öffentlicher Remote-Endpunkt (z.B. mcp.woof.systems),
   hinter Caddy/Cloudflare, keylos wie die API. Per INFRANODE_MCP_TRANSPORT
   =streamable-http aktiviert; INFRANODE_MCP_API_BASE zeigt dann auf die
-  öffentliche API (https://infranode.dev/api/v1).
+  öffentliche API (https://<rest-api-domain>/api/v1).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from infranode.registry.catalog import CITY_DATA_CATALOG
 # 2026-07-01) und ist fuer JEDEN Client bei JEDEM Connect sichtbar, nicht nur fuer
 # Claude Code mit eigenem Memory.
 _INSTRUCTIONS = (
-    "InfraNode is a keyless, read-only open-data API for 84 German cities with "
+    "Atlas is a keyless, read-only open-data API for 84 German cities with "
     "~60 data types, exposed as {tool_count} MCP tools (count is live from this "
     "server, not a cached or remembered number). To answer ANY city question, "
     "START with get_city_overview(slug): it returns the city's base data, a "
@@ -57,8 +57,8 @@ _INSTRUCTIONS = (
     "'frankfurt' all resolve to the canonical slug), so you rarely need the exact "
     "ASCII slug; an unrecognized name returns a 404 whose hint names the closest "
     "match ('Meintest du ...?'). Discover the canonical slugs with list_cities (or the "
-    "infranode://cities resource); browse every data type with the "
-    "infranode://catalog resource; see sources and licenses with sources. "
+    "atlas://cities resource); browse every data type with the "
+    "atlas://catalog resource; see sources and licenses with sources. "
     "Compare one metric across many cities in one call with compare. Every tool "
     "returns a canonical {data, meta} envelope; meta.source_status tells you whether "
     "a source delivered data (ok / no_data / not_covered / disabled / error), so a "
@@ -68,11 +68,11 @@ _INSTRUCTIONS = (
     "timestamps carry a time zone and a missing value is null, never an empty "
     "string. Some responses still contain older duplicate field names with "
     "identical values; they are deprecated, so prefer the canonical ones. The "
-    "infranode://catalog resource spells the conventions out. Coverage keeps "
+    "atlas://catalog resource spells the conventions out. Coverage keeps "
     "growing: more data types and cities are added regularly."
 )
 
-mcp = FastMCP("infranode", instructions=_INSTRUCTIONS)
+mcp = FastMCP("atlas", instructions=_INSTRUCTIONS)
 
 # Haelt die Namen aller ueber _register() registrierten Tools fest, damit die
 # Instructions unten die ECHTE, aktuelle Zahl tragen koennen statt eine
@@ -80,13 +80,13 @@ mcp = FastMCP("infranode", instructions=_INSTRUCTIONS)
 _registered_tool_names: list[str] = []
 
 
-# Verhaltens-Hinweise (MCP Tool Annotations): Jedes InfraNode-Tool ist ein
+# Verhaltens-Hinweise (MCP Tool Annotations): Jedes Atlas-Tool ist ein
 # read-only GET-Wrapper auf die Live-API: es schreibt keinen State, ist gefahrlos
 # wiederholbar (idempotent) und nicht destruktiv. Clients können Aufrufe so ohne
 # Rückfrage zulassen; Verzeichnis-Scanner (Glama/Smithery) bewerten die
 # Transparenz positiv. ``open_world`` unterscheidet ehrlich: Datentools ziehen
 # Live-Daten von externen Behörden-APIs (offene, veränderliche Domäne = True),
-# die Meta-Tools list_cities/sources liefern dagegen InfraNodes eigene,
+# die Meta-Tools list_cities/sources liefern dagegen Atlas eigene,
 # abgeschlossene Abdeckungsliste (geschlossene Domäne = False).
 def _annotations(*, open_world: bool) -> ToolAnnotations:
     return ToolAnnotations(
@@ -171,7 +171,7 @@ def _register(fn, *, open_world: bool = True) -> None:
 # Tokens Tool-Liste, Cursor-80-Tool-Limit in Sichtweite). Jetzt: wenige
 # namentliche Tools (Einstieg/Meta/parametrisiert/populaer) + EIN generisches
 # get_city_resource fuer den gesamten Long-Tail. Die Datenarten-Discovery
-# uebernimmt get_city_overview + infranode://catalog (je Datenart der
+# uebernimmt get_city_overview + atlas://catalog (je Datenart der
 # resource-Schluessel) + das resource-Enum im inputSchema des generischen Tools.
 _register(tools.get_city)
 # Owner 2026-06-24: Ein-Aufruf-Überblick (Basis + Katalog aller Datenarten +
@@ -293,24 +293,24 @@ _stamp_datatype_count()
 
 
 # MCP Resources: expose the coverage catalog as browsable resources, so clients
-# can discover what InfraNode offers (cities + sources) without a tool call.
-@mcp.resource("infranode://cities")
+# can discover what Atlas offers (cities + sources) without a tool call.
+@mcp.resource("atlas://cities")
 async def cities_resource() -> ToolEnvelope:
     """All covered German cities with slug, federal state, population and coverage."""
     return await tools.list_cities()
 
 
-@mcp.resource("infranode://sources")
+@mcp.resource("atlas://sources")
 async def sources_resource() -> ToolEnvelope:
-    """All InfraNode data sources with license, attribution and availability."""
+    """All Atlas data sources with license, attribution and availability."""
     return await tools.sources()
 
 
-@mcp.resource("infranode://catalog")
+@mcp.resource("atlas://catalog")
 async def catalog_resource() -> dict:
     """The catalog of all per-city data types: label, matching tool and REST path.
 
-    Lets an agent browse the full breadth of InfraNode (every data type and the tool
+    Lets an agent browse the full breadth of Atlas (every data type and the tool
     that fetches it) without a tool call. For a live, per-city view with coverage
     status and highlights, call get_city_overview(slug).
     """
@@ -325,7 +325,7 @@ async def catalog_resource() -> dict:
             for dt in CITY_DATA_CATALOG
         ],
         "note": (
-            "InfraNode keeps adding more data types and cities. Start with "
+            "Atlas keeps adding more data types and cities. Start with "
             "get_city_overview(slug) for a live, per-city view. Where 'tool' is "
             "get_city_resource, pass the 'type' value as its resource argument."
         ),
@@ -368,7 +368,7 @@ async def catalog_resource() -> dict:
 # MCP Prompts: a few ready-made prompts that showcase common multi-tool flows.
 @mcp.prompt()
 def city_overview(slug: str) -> str:
-    """Get a complete picture of a German city and what InfraNode offers for it."""
+    """Get a complete picture of a German city and what Atlas offers for it."""
     return (
         f"Give me an overview of the German city '{slug}'. Call get_city_overview "
         "first to see its base data, every available data type (with the tool to "
@@ -382,7 +382,7 @@ def city_briefing(slug: str) -> str:
     """A concise live briefing (weather, air, transit) for a German city."""
     return (
         f"Give me a concise current briefing for the German city '{slug}'. "
-        "Use the InfraNode tools to fetch weather, air quality and live "
+        "Use the Atlas tools to fetch weather, air quality and live "
         "public-transport departures, then summarize the situation in a few "
         "bullet points. If a source has no data, say so briefly."
     )
@@ -393,7 +393,7 @@ def compare_air_quality(cities: str) -> str:
     """Compare current air quality across several German cities."""
     return (
         f"Compare the current air quality across these German cities: {cities}. "
-        "Use the InfraNode 'compare' tool with resource='air', then rank the "
+        "Use the Atlas 'compare' tool with resource='air', then rank the "
         "cities from cleanest to most polluted and note any missing data."
     )
 

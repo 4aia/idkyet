@@ -1,11 +1,11 @@
 [project]
-name = "infranode"
+name = "atlas"
 version = "1.0.0"
-description = "InfraNode API: quelloffene Proxy-REST-API fuer offene Daten deutscher Staedte"
+description = "Atlas: proprietaere Proxy-REST-API fuer offene Daten deutscher Staedte"
 authors = [
-    { name = "street1983nk", email = "street1983nk@users.noreply.github.com" }
+    { name = "woof.systems" }
 ]
-license = "Apache-2.0"
+license = { text = "Proprietary" }
 requires-python = ">=3.13"
 dependencies = [
     "asgi-correlation-id==5.0.0",

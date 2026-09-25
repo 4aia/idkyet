@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
-  title: InfraNode API
+  title: Atlas API
   version: 1.0.0
   description: >-
-    Open-Source-Proxy-REST-API für normalisierte offene Daten deutscher
-    Großstädte. Bekannt sind 84 Städte über 100.000 Einwohner, davon 28
+    Interne, proprietäre Proxy-REST-API für normalisierte offene Daten
+    deutscher Großstädte (die einzige öffentliche Schnittstelle ist der
+    Atlas-MCP-Server, siehe rust/atlas-mcp/). Bekannt sind 84 Städte über
+    100.000 Einwohner, davon 28
     Kern-Städte mit voller Quellen-Abdeckung; weitere Städte werden über
     AGS- und geobasierte Quellen bedient. Jede Antwort folgt demselben
     kanonischen Envelope (data/meta/attribution) mit Lizenz-Tag und ehrlichem
@@ -35,13 +37,10 @@ info:
     identischem Wert daneben; sie sind ABGEKUENDIGT und werden fruehestens 30
     Tage nach der Ankuendigung im Changelog entfernt.
   license:
-    name: Apache-2.0
-    url: https://www.apache.org/licenses/LICENSE-2.0
+    name: Proprietary
 servers:
-  - url: https://infranode.dev
-    description: Öffentliche gehostete API, keylos (Standard)
-  - url: http://localhost
-    description: Lokaler Caddy-Ingress (Docker Compose)
+  - url: http://localhost:8000
+    description: Lokal (uv run uvicorn infranode.main:app)
 tags:
   - name: meta
     description: Meta- und Diagnose-Routen (Health, Ping, Source-Status, Spec)

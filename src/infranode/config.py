@@ -1,9 +1,9 @@
 """Zentrale Konfiguration (FND-02).
 
-Eine einzige ``Settings``-Quelle liest ``.env`` + Umgebungsvariablen mit dem
-Prefix ``INFRANODE_``. Per-Source ``enable_*``-Flags ermöglichen Graceful
-Degradation; Schlüssel-Felder sind ``SecretStr | None`` (Default None =
-Quelle nicht nutzbar, kein Secret im Code).
+Eine einzige ``Settings``-Quelle liest ``.env`` + Umgebungsvariablen als
+camelCase (kein Prefix, siehe ``alias_generator`` unten). Per-Source
+``enable_*``-Flags ermöglichen Graceful Degradation; Schlüssel-Felder sind
+``SecretStr | None`` (Default None = Quelle nicht nutzbar, kein Secret im Code).
 
 WARTBARKEIT (2026-06-21): Die Felder sind in thematische Mixin-Klassen
 gruppiert (CoreSettings, RateLimitSettings, AdminSettings, SourceToggleSettings,
@@ -13,9 +13,10 @@ EINER flachen Klasse. Das ist bewusst KEINE verschachtelte Struktur
 (``settings.admin.password``): die Felder bleiben flach (``settings.enable_vgn``),
 weil (a) die Quellen-Toggles an mehreren Stellen dynamisch über
 ``getattr(settings, f"enable_{name}")`` aufgelöst werden (sources/live/cities/
-watchdog/admin) und (b) verschachtelte Modelle die Env-Variablennamen ändern
-würden (``INFRANODE_ADMIN__PASSWORD`` statt ``INFRANODE_ADMIN_PASSWORD``), was
-die produktive .env bräche. Neue Felder in die thematisch passende Mixin-Klasse.
+watchdog/admin) und (b) verschachtelte Modelle einen Verschachtelungs-Trenner in
+die Env-Namen einführen würden (``admin__password`` statt ``adminPassword``),
+was die produktive .env bräche. Neue Felder in die thematisch passende
+Mixin-Klasse.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from pydantic import AliasChoices, Field, SecretStr
+from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,16 +42,16 @@ class CoreSettings(BaseSettings):
     # credentialed APIs. Hier wird allow_credentials in main.py auf False
     # gesetzt, sobald "*" aktiv ist (CORS-Spec: "*" + credentials schließen sich
     # aus). Das Admin-Dashboard ist same-origin (Cookie cs_admin SameSite=strict)
-    # und von CORS unberührt. Per INFRANODE_CORS_ORIGINS auf eine Whitelist
+    # und von CORS unberührt. Per corsOrigins auf eine Whitelist
     # einschränkbar (dann wird wieder credentialed CORS verwendet).
     cors_origins: list[str] = ["*"]
 
     # Optionaler Override des Upstream-User-Agents (RES-05). None = die
-    # USER_AGENT-Konstante aus infra/http.py greift; per INFRANODE_HTTP_USER_AGENT
+    # USER_AGENT-Konstante aus infra/http.py greift; per httpUserAgent
     # überschreibbar (z.B. für Staging-Kennzeichnung).
     http_user_agent: str | None = None
 
-    # Wurzelpfad des lokalen Datenverzeichnisses. Per INFRANODE_ARCHIVE_DIR
+    # Wurzelpfad des lokalen Datenverzeichnisses. Per archiveDir
     # überschreibbar, damit Tests nach tmp_path schreiben statt ins echte data/.
     # (Feld-/Env-Name aus Kompatibilitätsgründen unverändert.)
     archive_dir: str = "data/archive"
@@ -58,7 +60,7 @@ class CoreSettings(BaseSettings):
     # Drei defensive Deckel gegen Connection-Pool-Exhaustion. Rein defensiv: im
     # Normalbetrieb aendert sich NICHTS (die Defaults spiegeln die bisherigen
     # effektiven Werte), nur bei Ueberlast greifen die Deckel. Alle acht Felder
-    # sind per INFRANODE_*-Env ohne Code-Deploy einstellbar. BEWUSST NICHT Teil
+    # sind per Env (camelCase) ohne Code-Deploy einstellbar. BEWUSST NICHT Teil
     # dieser Aenderung: die Umstellung des MCP-Servers auf stateless_http
     # (separate Design-Entscheidung) und Auto-Scaling.
     #
@@ -101,7 +103,7 @@ class RateLimitSettings(BaseSettings):
     # Data-Science-/Dashboard-Spitzen UND ein nachhaltiges STUNDEN-Budget gegen
     # Dauer-Scraping. Beide gelten gleichzeitig: ANON_LIMIT kombiniert sie
     # semikolon-getrennt, slowapi/limits ``parse_many`` liest das als MEHRERE
-    # Limits. Per INFRANODE_LIMIT_ANON überschreibbar (z.B. Tests).
+    # Limits. Per limitAnon überschreibbar (z.B. Tests).
     # Historie: früher pauschal 300/min (=18.000/h), dann 120/min + 3000/h
     # (Härtung 2026-06-21). Owner 2026-06-24 auf 300/min Burst + 6000/h nachhaltig
     # angehoben (Schnitt 100/min), damit KI-Agenten/Power-User-Flows nicht in 429
@@ -125,7 +127,7 @@ class RateLimitSettings(BaseSettings):
     # BEWUSST hoch (Default 3000/min = ~10x das IP-Burst-Budget), damit legitime
     # NAT-/Campus-Nutzer hinter einer gemeinsamen IP NICHT getroffen werden; es
     # greift erst, wenn aus EINEM Subnetz untypisch viele Anfragen kommen. Leer
-    # ("") = deaktiviert. Per INFRANODE_LIMIT_SUBNET überschreibbar.
+    # ("") = deaktiviert. Per limitSubnet überschreibbar.
     # Owner 2026-06-24 von 1200 auf 3000/min mitgezogen (proportional zum auf
     # 300/min angehobenen IP-Burst, Verhältnis ~10x bleibt -> keine Lücke für
     # Bot-Schwärme, NAT-Schutz erhalten).
@@ -141,7 +143,7 @@ class RateLimitSettings(BaseSettings):
     # NUR Limit-Bypass, KEINE Auth; das Admin-Login-Limit (Brute-Force-Schutz)
     # gilt IMMER, auch für allowlistete IPs. FAIL-SAFE: leer (Default) oder
     # Müll-Einträge = niemand allowlistet (Ist-Verhalten). Per Env
-    # INFRANODE_RATELIMIT_ALLOWLIST ohne Code-Deploy änderbar; dieselbe Env
+    # ratelimitAllowlist ohne Code-Deploy änderbar; dieselbe Env
     # liest auch der MCP-Container (infra/allowlist.py, stdlib-only).
     ratelimit_allowlist: str = ""
     # Rate-Limit je ChatGPT-GPT-Nutzer (api/v1/gpt_guard.py): OpenAI-Actions-
@@ -149,7 +151,7 @@ class RateLimitSettings(BaseSettings):
     # die dafür auf der Allowlist stehen; dieses Limit ist der Backstop je
     # ephemerer OpenAI-Nutzer-Kennung. Default wie der MCP-Endpunkt (480/min,
     # Owner-Historie s. mcp/ratelimit.py). Leer ("") = deaktiviert. Per
-    # INFRANODE_LIMIT_GPT überschreibbar.
+    # limitGpt überschreibbar.
     limit_gpt: str = "480/minute"
     # Optionaler Cloudflare-Bot-Score-Schwellwert (1-99; 0 = deaktiviert). Greift
     # NUR, wenn Cloudflare den Header ``cf-bot-score`` setzt (Bot Management /
@@ -184,7 +186,7 @@ class AdminSettings(BaseSettings):
     admin_trusted_networks: list[str] = []
     # DB-IP-Lite-Verzeichnis für den Traffic-Tab (Country- + ASN-mmdb). Der
     # GeoIP/ASN-Lookup (infra/geoip.py) liest die Dateien lokal, keine Besucher-IP
-    # verlässt den Server. Per INFRANODE_GEOIP_DIR überschreibbar; Tests zeigen
+    # verlässt den Server. Per geoipDir überschreibbar; Tests zeigen
     # auf tmp_path. Fehlt das Verzeichnis, degradiert der Lookup graceful ("-").
     geoip_dir: str = "data/geoip"
 
@@ -214,7 +216,7 @@ class SourceToggleSettings(BaseSettings):
     # statt 1540). Default 2000; der echte Gesamtbestand kommt unabhängig über
     # ``count_pois`` als ``total_available`` + ``truncated``-Flag. Die Route reicht
     # diesen Wert als ``limit`` an ``read_pois`` durch. Per
-    # INFRANODE_OVERPASS_MAX_ELEMENTS anpassbar.
+    # overpassMaxElements anpassbar.
     overpass_max_elements: int = 2000
     enable_autobahn: bool = True
     enable_hvv: bool = False
@@ -229,14 +231,14 @@ class SourceToggleSettings(BaseSettings):
     enable_dwd_pollen: bool = True
     # DWD Waldbrand-/Graslandfeuerindex (keylos, GeoNutzV, Tier A). Daten ueber
     # einen oeffentlichen ArcGIS-FeatureServer (DWD-Daten-Re-Host). Host operator-
-    # konfigurierbar (INFRANODE_DWD_FIRE_BASE_URL); Env = Operator-Input (kein
+    # konfigurierbar (dwdFireBaseUrl); Env = Operator-Input (kein
     # User-Input) -> SSRF-Invariante bleibt gewahrt.
     enable_dwd_fire: bool = True
     dwd_fire_base_url: str = "https://services2.arcgis.com/7wuv6DH7DYhDuwvU/ArcGIS/rest/services/DWD/FeatureServer"
     # EEA Badegewaesserqualitaet (keylos, CC-BY 4.0, Tier A). Jahres-MapServer der
     # EEA DiscoMap; der Jahres-Teil der URL + eea_bathing_year werden nachgezogen,
     # sobald die EEA die neue Badesaison bewertet. Host operator-konfigurierbar
-    # (INFRANODE_EEA_BATHING_BASE_URL) -> SSRF-Invariante bleibt gewahrt.
+    # (eeaBathingBaseUrl) -> SSRF-Invariante bleibt gewahrt.
     enable_eea_bathing: bool = True
     eea_bathing_base_url: str = (
         "https://water.discomap.eea.europa.eu/arcgis/rest/services/BathingWater/"
@@ -319,14 +321,14 @@ class SourceToggleSettings(BaseSettings):
     enable_muenchen_parking: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_PARKING", "INFRANODE_ENABLE_MUENCHEN_PARKHAEUSER"
+            "enableMuenchenParking", "enableMuenchenParkhaeuser"
         ),
     )
     enable_muenchen_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_BIKE_COUNTS",
-            "INFRANODE_ENABLE_MUENCHEN_RADZAEHL",
+            "enableMuenchenBikeCounts",
+            "enableMuenchenRadzaehl",
         ),
     )
     # Quick-260729-muc: ruhender Verkehr München (parking-onstreet, park-and-ride,
@@ -335,74 +337,74 @@ class SourceToggleSettings(BaseSettings):
     enable_muenchen_parking_onstreet: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_PARKING_ONSTREET",
-            "INFRANODE_ENABLE_MUENCHEN_PARKRAUM",
+            "enableMuenchenParkingOnstreet",
+            "enableMuenchenParkraum",
         ),
     )
     enable_muenchen_park_and_ride: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_PARK_AND_RIDE",
-            "INFRANODE_ENABLE_MUENCHEN_PARK_RIDE",
+            "enableMuenchenParkAndRide",
+            "enableMuenchenParkRide",
         ),
     )
     enable_muenchen_mobility_points: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_MOBILITY_POINTS",
-            "INFRANODE_ENABLE_MUENCHEN_MOBILITAETSPUNKTE",
+            "enableMuenchenMobilityPoints",
+            "enableMuenchenMobilitaetspunkte",
         ),
     )
     enable_muenchen_bike_parking: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_BIKE_PARKING",
-            "INFRANODE_ENABLE_MUENCHEN_RADPARKEN",
+            "enableMuenchenBikeParking",
+            "enableMuenchenRadparken",
         ),
     )
     # DATA-40 bike-counts: kommunale Radzählstellen je Stadt (keylos, Tier A).
     enable_leipzig_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_LEIPZIG_BIKE_COUNTS", "INFRANODE_ENABLE_LEIPZIG_RADZAEHL"
+            "enableLeipzigBikeCounts", "enableLeipzigRadzaehl"
         ),
     )
     enable_hamburg_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HAMBURG_BIKE_COUNTS", "INFRANODE_ENABLE_HAMBURG_RADZAEHL"
+            "enableHamburgBikeCounts", "enableHamburgRadzaehl"
         ),
     )
     enable_berlin_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_BERLIN_BIKE_COUNTS", "INFRANODE_ENABLE_BERLIN_RADZAEHL"
+            "enableBerlinBikeCounts", "enableBerlinRadzaehl"
         ),
     )
     enable_stuttgart_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_STUTTGART_BIKE_COUNTS",
-            "INFRANODE_ENABLE_STUTTGART_RADZAEHL",
+            "enableStuttgartBikeCounts",
+            "enableStuttgartRadzaehl",
         ),
     )
     enable_koeln_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KOELN_BIKE_COUNTS", "INFRANODE_ENABLE_KOELN_RADZAEHL"
+            "enableKoelnBikeCounts", "enableKoelnRadzaehl"
         ),
     )
     enable_essen_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_ESSEN_BIKE_COUNTS", "INFRANODE_ENABLE_ESSEN_RADZAEHL"
+            "enableEssenBikeCounts", "enableEssenRadzaehl"
         ),
     )
     enable_duesseldorf_bike_counts: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_DUESSELDORF_BIKE_COUNTS",
-            "INFRANODE_ENABLE_DUESSELDORF_RADZAEHL",
+            "enableDuesseldorfBikeCounts",
+            "enableDuesseldorfRadzaehl",
         ),
     )
     # DATA-40: ParkenDD-Aggregator (keylos) = bevorzugte Live-Parkbelegung für
@@ -413,7 +415,7 @@ class SourceToggleSettings(BaseSettings):
     enable_heritage: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HERITAGE", "INFRANODE_ENABLE_DENKMAL"
+            "enableHeritage", "enableDenkmal"
         ),
     )
     # DATA-OSM-Tier-2: Baumkataster je Stadt (kommunaler On-demand-WFS, keylos).
@@ -421,7 +423,7 @@ class SourceToggleSettings(BaseSettings):
     enable_tree_cadastre: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_TREE_CADASTRE", "INFRANODE_ENABLE_BAUMKATASTER"
+            "enableTreeCadastre", "enableBaumkataster"
         ),
     )
     # DATA-OSM-Tier-2: Zensus-2022-100m-Gitter (keyloser ArcGIS-FeatureServer) für
@@ -439,7 +441,7 @@ class SourceToggleSettings(BaseSettings):
     enable_holidays: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HOLIDAYS", "INFRANODE_ENABLE_FEIERTAGE"
+            "enableHolidays", "enableFeiertage"
         ),
     )
     # Phase 9: keylose Stadt-Verkehrs-Quellen (Baustellen/Sperrungen) je Stadt +
@@ -448,34 +450,34 @@ class SourceToggleSettings(BaseSettings):
     enable_hamburg_roadworks: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HAMBURG_ROADWORKS", "INFRANODE_ENABLE_HAMBURG_BAUSTELLEN"
+            "enableHamburgRoadworks", "enableHamburgBaustellen"
         ),
     )
     enable_koeln_road_events: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KOELN_ROAD_EVENTS", "INFRANODE_ENABLE_KOELN_VERKEHR"
+            "enableKoelnRoadEvents", "enableKoelnVerkehr"
         ),
     )
     enable_muenchen_roadworks: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_MUENCHEN_ROADWORKS",
-            "INFRANODE_ENABLE_MUENCHEN_BAUSTELLEN",
+            "enableMuenchenRoadworks",
+            "enableMuenchenBaustellen",
         ),
     )
     enable_dortmund_roadworks: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_DORTMUND_ROADWORKS",
-            "INFRANODE_ENABLE_DORTMUND_BAUSTELLEN",
+            "enableDortmundRoadworks",
+            "enableDortmundBaustellen",
         ),
     )
     # rostock_roadworks: keyloser OpenData.HRO-GeoJSON-Feed (CC0) -> Default True.
     enable_rostock_roadworks: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_ROSTOCK_ROADWORKS", "INFRANODE_ENABLE_ROSTOCK_BAUSTELLEN"
+            "enableRostockRoadworks", "enableRostockBaustellen"
         ),
     )
     # SPERRINFOSYS Sachsen: keylos, EINE Quelle für Dresden + Leipzig.
@@ -493,7 +495,7 @@ class SourceToggleSettings(BaseSettings):
     # CC-BY 4.0 (nicht CC-BY-SA wie gtfs.de/DELFI), eigener Redis-Keyspace
     # transit_rt:vbb: und eigener Poller. Keylos -> sofort scharfschaltbar, folgt
     # aber dem enable_-Muster und bleibt Default False (kein Verhaltenswechsel bis
-    # der Owner INFRANODE_ENABLE_VBB=true setzt). Dieser Toggle hat KEINE SourceSpec
+    # der Owner enableVbb=true setzt). Dieser Toggle hat KEINE SourceSpec
     # in der Registry (der Read-Pfad bleibt die bestehende gtfs_rt-Datenart, VBB
     # bevorzugt nur den eigenen Keyspace); der Drift-Test test_source_specs_registry
     # verlangt nur Toggle-je-Registry-Quelle, nicht umgekehrt.
@@ -507,8 +509,8 @@ class SourceToggleSettings(BaseSettings):
     enable_hamburg_traffic_situation: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HAMBURG_TRAFFIC_SITUATION",
-            "INFRANODE_ENABLE_HAMBURG_VERKEHRSLAGE",
+            "enableHamburgTrafficSituation",
+            "enableHamburgVerkehrslage",
         ),
     )
     # Quick-260707-mmi: RMV/Rhein-Main Live-Abfahrten (Frankfurt am Main). KEYED
@@ -518,14 +520,14 @@ class SourceToggleSettings(BaseSettings):
     # Quick-260707-p9c: VRR/Rhein-Ruhr Live-Abfahrten (generischer Mentz-EFA-
     # Adapter, sechs Kernstaedte). VRR EFA ist KEYLOS, aber der Toggle steht Default
     # False fuer Konsistenz mit dem VBB/RMV-Rollout dieser Session; kein
-    # Verhaltenswechsel, bis der Owner INFRANODE_ENABLE_VRR setzt (keine Credentials
+    # Verhaltenswechsel, bis der Owner enableVrr setzt (keine Credentials
     # noetig). KEIN Eintrag in registry/source_specs.py noetig (RMV-Praezedenz: der
     # Drift-Test verlangt nur Toggle-je-Registry-Quelle, nicht umgekehrt).
     enable_vrr: bool = False
     # Quick-260708-73a: VVS Stuttgart, die zweite keylose Mentz-EFA-Instanz (kein
     # Credential noetig, base_url www3.vvs.de hartkodiert im Handler). Default False
     # fuer Konsistenz mit dem VRR-Rollout; kein Verhaltenswechsel, bis der Owner
-    # INFRANODE_ENABLE_VVS setzt. KEIN Eintrag in registry/source_specs.py noetig
+    # enableVvs setzt. KEIN Eintrag in registry/source_specs.py noetig
     # (VRR-Praezedenz: der Drift-Test verlangt nur Toggle-je-Registry-Quelle).
     enable_vvs: bool = False
     # Phase 20: Mobilithek-mTLS-Live-Quellen (Live = Cert + Abo nötig, daher alle
@@ -536,31 +538,31 @@ class SourceToggleSettings(BaseSettings):
     enable_koeln_roadworks_live: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KOELN_ROADWORKS_LIVE",
-            "INFRANODE_ENABLE_KOELN_BAUSTELLEN_LIVE",
+            "enableKoelnRoadworksLive",
+            "enableKoelnBaustellenLive",
         ),
     )
     enable_koeln_incidents_live: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KOELN_INCIDENTS_LIVE",
-            "INFRANODE_ENABLE_KOELN_EREIGNISSE_LIVE",
+            "enableKoelnIncidentsLive",
+            "enableKoelnEreignisseLive",
         ),
     )
     enable_koeln_lez_live: bool = False
     enable_berlin_traffic_reports: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_BERLIN_TRAFFIC_REPORTS",
-            "INFRANODE_ENABLE_BERLIN_VERKEHRSMELDUNGEN",
+            "enableBerlinTrafficReports",
+            "enableBerlinVerkehrsmeldungen",
         ),
     )
     enable_dortmund_parking: bool = True
     enable_kiel_counting_stations: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KIEL_COUNTING_STATIONS",
-            "INFRANODE_ENABLE_KIEL_ZAEHLSTELLEN",
+            "enableKielCountingStations",
+            "enableKielZaehlstellen",
         ),
     )
     enable_eround_charging: bool = False
@@ -570,7 +572,7 @@ class SourceToggleSettings(BaseSettings):
     enable_koeln_wait_times: bool = Field(
         default=True,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_KOELN_WAIT_TIMES", "INFRANODE_ENABLE_KOELN_WARTEZEITEN"
+            "enableKoelnWaitTimes", "enableKoelnWartezeiten"
         ),
     )
     # Quick-260705-ufv: BBK NINA Bevoelkerungsschutz-Warnungen (civil-protection-
@@ -586,7 +588,7 @@ class SourceToggleSettings(BaseSettings):
     enable_bremen_roadworks: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_BREMEN_ROADWORKS", "INFRANODE_ENABLE_BREMEN_BAUSTELLEN"
+            "enableBremenRoadworks", "enableBremenBaustellen"
         ),
     )
     # Hannover Verkehrsmeldungen (Mobilithek DATEX II V2 Situation, DL-DE/BY 2.0).
@@ -594,8 +596,8 @@ class SourceToggleSettings(BaseSettings):
     enable_hannover_traffic_reports: bool = Field(
         default=False,
         validation_alias=AliasChoices(
-            "INFRANODE_ENABLE_HANNOVER_TRAFFIC_REPORTS",
-            "INFRANODE_ENABLE_HANNOVER_VERKEHRSMELDUNGEN",
+            "enableHannoverTrafficReports",
+            "enableHannoverVerkehrsmeldungen",
         ),
     )
     # Frankfurt am Main Parkdaten (Mobilithek DATEX II V3 Parking, statisch +
@@ -662,7 +664,7 @@ class CredentialSettings(BaseSettings):
     """
 
     # Phase 8 GENESIS/Zensus (account-gated POST-API). Feldname genesis_username,
-    # weil der Owner genau INFRANODE_GENESIS_USERNAME (+ _PASSWORD) in der .env
+    # weil der Owner genau genesisUsername (+ _PASSWORD) in der .env
     # gesetzt hat. Zensus nutzt evtl. einen getrennten Account (eigene Felder).
     genesis_username: str | None = None
     genesis_password: SecretStr | None = None
@@ -675,10 +677,10 @@ class CredentialSettings(BaseSettings):
     # Quick-260707-mmi: RMV HAPI accessId (Rhein-Main Live-Abfahrten). Nur in den
     # Query-Parameter ``accessId`` der Upstream-Requests, NIE in Cache-Key/
     # Response/Log. None -> Route liefert 200 source_status="disabled". Env
-    # INFRANODE_RMV_ACCESS_ID.
+    # rmvAccessId.
     rmv_access_id: SecretStr | None = None
     # DATA-30: Tankerkönig-API-Key. Nur in den Query-Parameter ``apikey``. None ->
-    # Route liefert 200 source_status="disabled". Env INFRANODE_TANKERKOENIG_KEY.
+    # Route liefert 200 source_status="disabled". Env tankerkoenigKey.
     tankerkoenig_key: SecretStr | None = None
     # DATA-34: DB-Timetables-Credentials (DB API Marketplace). Nur in die Header
     # DB-Client-Id/DB-Api-Key. None -> Route 200 disabled.
@@ -708,23 +710,23 @@ class MobilithekSettings(BaseSettings):
     koeln_roadworks_live_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_KOELN_ROADWORKS_LIVE_ABO_ID",
-            "INFRANODE_KOELN_BAUSTELLEN_LIVE_ABO_ID",
+            "koelnRoadworksLiveAboId",
+            "koelnBaustellenLiveAboId",
         ),
     )
     koeln_incidents_live_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_KOELN_INCIDENTS_LIVE_ABO_ID",
-            "INFRANODE_KOELN_EREIGNISSE_LIVE_ABO_ID",
+            "koelnIncidentsLiveAboId",
+            "koelnEreignisseLiveAboId",
         ),
     )
     koeln_lez_live_abo_id: str | None = None
     berlin_traffic_reports_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_BERLIN_TRAFFIC_REPORTS_ABO_ID",
-            "INFRANODE_BERLIN_VERKEHRSMELDUNGEN_ABO_ID",
+            "berlinTrafficReportsAboId",
+            "berlinVerkehrsmeldungenAboId",
         ),
     )
     # dortmund_parking seit 2026-06-13 keylos -> ungenutzt, bleibt für SSRF-Konsistenz.
@@ -732,8 +734,8 @@ class MobilithekSettings(BaseSettings):
     kiel_counting_stations_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_KIEL_COUNTING_STATIONS_ABO_ID",
-            "INFRANODE_KIEL_ZAEHLSTELLEN_ABO_ID",
+            "kielCountingStationsAboId",
+            "kielZaehlstellenAboId",
         ),
     )
     eround_charging_abo_id: str | None = None
@@ -748,7 +750,7 @@ class MobilithekSettings(BaseSettings):
     bremen_roadworks_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_BREMEN_ROADWORKS_ABO_ID", "INFRANODE_BREMEN_BAUSTELLEN_ABO_ID"
+            "bremenRoadworksAboId", "bremenBaustellenAboId"
         ),
     )
     # Hannover Verkehrsmeldungen (DATEX II V2 SituationPublication, path-Pull).
@@ -757,8 +759,8 @@ class MobilithekSettings(BaseSettings):
     hannover_traffic_reports_abo_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "INFRANODE_HANNOVER_TRAFFIC_REPORTS_ABO_ID",
-            "INFRANODE_HANNOVER_VERKEHRSMELDUNGEN_ABO_ID",
+            "hannoverTrafficReportsAboId",
+            "hannoverVerkehrsmeldungenAboId",
         ),
     )
     # Frankfurt Parkdaten: ZWEI Abos (DATEX II V3, container-Pull). Das dynamische
@@ -803,7 +805,7 @@ class TransitSettings(BaseSettings):
     transit_rt_source: str = "gtfs_de"
     # Mobilithek-DELFI-Realtime-Abo-ID als SSRF-Allowlist (aboId NIE aus User-Input).
     # None = Quelle nicht auflösbar. Owner-Abo nur in der gitignored .env
-    # (INFRANODE_TRANSIT_RT_DELFI_ABO_ID).
+    # (transitRtDelfiAboId).
     transit_rt_delfi_abo_id: str | None = None
 
 
@@ -904,7 +906,8 @@ class MonitoringSettings(BaseSettings):
     # warnt, bevor der Redis-Speicheranteil (used_memory/maxmemory) die Eviction-
     # Grenze erreicht. capacity_hysteresis_ticks = 2 verlangt zwei aufeinander-
     # folgende Ueberschreitungen, damit ein einzelner Lastspitzen-Tick keinen
-    # Fehlalarm ausloest. Alle drei per INFRANODE_CAPACITY_*-Env ueberschreibbar.
+    # Fehlalarm ausloest. Alle drei per capacityLoadPerCoreWarn/-RedisMemWarn/
+    # -HysteresisTicks-Env ueberschreibbar.
     capacity_load_per_core_warn: float = 0.75
     capacity_redis_mem_warn: float = 0.80
     capacity_hysteresis_ticks: int = 2
@@ -914,14 +917,14 @@ class MonitoringSettings(BaseSettings):
     # haeuft. Eine gewisse Grundzahl an no_data/Fehlzellen ist normal (nicht jede
     # Datenart deckt jede Stadt ab); erst eine Haeufung ueber dieser Schwelle deutet
     # auf ein systematisches Problem. Bewusst konservativer Default 10, per
-    # INFRANODE_WATCHDOG_MATRIX_WARN_CELLS ohne Code-Deploy anpassbar.
+    # watchdogMatrixWarnCells ohne Code-Deploy anpassbar.
     watchdog_matrix_warn_cells: int = 10
     # 5xx-Häufungs-Alarm (2026-07-09, Owner-Wunsch Fehler-Tracking): der Watchdog
     # warnt per WARNING-Push, wenn die laufende UTC-Stunde mehr als diese Zahl
     # Server-Fehler (Status >= 500) zählt (Quelle: metrics:req:5xx:hour:*, von der
     # API-Middleware geschrieben). 0 = Check aus. Default 100: einzelne 503 aus dem
     # bewussten Upstream-Fehler-Mapping sind normal, erst eine Häufung deutet auf
-    # einen Upstream-Massenausfall oder Bug. Per INFRANODE_ERRORS_5XX_HOURLY_ALERT
+    # einen Upstream-Massenausfall oder Bug. Per errors5XxHourlyAlert
     # ohne Code-Deploy anpassbar.
     errors_5xx_hourly_alert: int = 100
 
@@ -937,22 +940,24 @@ class Settings(
     BulkPathSettings,
     MonitoringSettings,
 ):
-    """Validierte Anwendungs-Settings aus Env/.env (Prefix INFRANODE_).
+    """Validierte Anwendungs-Settings aus Env/.env (camelCase, kein Prefix).
 
     Erbt alle Felder flach aus den thematischen Mixin-Klassen oben. ``model_config``
     steht NUR hier (greift via Vererbung für alle geerbten Felder). Zugriff bleibt
-    flach: ``settings.enable_vgn``, ``getattr(settings, "enable_<name>")``,
-    Env ``INFRANODE_<FELD>`` - unverändert gegenüber der früheren flachen Klasse.
+    flach: ``settings.enable_vgn``, ``getattr(settings, "enable_<name>")``. Der
+    Env-Name je Feld kommt aus ``alias_generator`` (``enable_vgn`` -> ``enableVgn``),
+    ausser dort, wo ein Feld einen expliziten ``validation_alias`` traegt.
     """
 
     # populate_by_name: die 2026-08-01 umbenannten Quellen-Felder (englische
     # SourceId-Namen) tragen validation_alias=AliasChoices(neu, alt), damit die
-    # produktiven .env-Dateien mit den alten INFRANODE_*-Namen weiter gelten.
-    # Ohne populate_by_name koennten Tests/Code diese Felder nicht mehr per
-    # Feldname (Settings(enable_holidays=False)) setzen.
+    # produktiven .env-Dateien mit den alten Namen (jetzt ebenfalls camelCase)
+    # weiter gelten. Ohne populate_by_name koennten Tests/Code diese Felder
+    # nicht mehr per Feldname (Settings(enable_holidays=False)) setzen.
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_prefix="INFRANODE_",
+        env_prefix="",
+        alias_generator=to_camel,
         extra="ignore",
         populate_by_name=True,
     )

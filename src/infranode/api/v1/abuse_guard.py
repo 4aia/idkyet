@@ -88,7 +88,7 @@ class AbuseGuardMiddleware(BaseHTTPMiddleware):
         )
         self._retry_after = str(self._item.get_expiry()) if self._item else "60"
         # Allowlist-Bypass (Connectors-Directory-Härtung 2026-07-02): CIDRs aus
-        # INFRANODE_RATELIMIT_ALLOWLIST umgehen Subnetz-Limit UND Bot-Score-
+        # ratelimitAllowlist umgehen Subnetz-Limit UND Bot-Score-
         # Block. Begründung Bot-Score: allowlistete Ranges sind ausdrücklich
         # zugelassene AUTOMATISIERTE Infrastruktur (Anthropic-Egress); ein
         # niedriger Bot-Score wäre dort erwartbar und ein 403 bräche den

@@ -2,10 +2,10 @@
 // around the internal Atlas REST API, exposed to AI agents over MCP. It
 // replaces the Python implementation at src/infranode/mcp/server.py.
 //
-// Transport is chosen via INFRANODE_MCP_TRANSPORT:
+// Transport is chosen via mcpTransport:
 //   - "stdio" (default): local subprocess, no open port.
 //   - "streamable-http": public remote endpoint (e.g. mcp.woof.systems),
-//     bound to INFRANODE_MCP_HOST:INFRANODE_MCP_PORT behind Caddy/Cloudflare,
+//     bound to mcpHost:mcpPort behind Caddy/Cloudflare,
 //     keyless like the REST API.
 package main
 
@@ -40,7 +40,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	transport := os.Getenv("INFRANODE_MCP_TRANSPORT")
+	transport := os.Getenv("mcpTransport")
 	if transport == "" {
 		transport = "stdio"
 	}
@@ -57,11 +57,11 @@ func main() {
 }
 
 func runStreamableHTTP(ctx context.Context, logger *slog.Logger, server *mcp.Server) {
-	host := os.Getenv("INFRANODE_MCP_HOST")
+	host := os.Getenv("mcpHost")
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	port := os.Getenv("INFRANODE_MCP_PORT")
+	port := os.Getenv("mcpPort")
 	if port == "" {
 		port = "8081"
 	}

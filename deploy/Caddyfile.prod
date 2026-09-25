@@ -18,11 +18,11 @@
 # intern via kuma:3001 erreichbar; Caddy bleibt der EINZIGE Ingress (Gateway-
 # Invariante). Das Kuma-Dashboard unter /dashboard ist Login-geschuetzt (starkes
 # Admin-Passwort, secrets/SERVER.md); oeffentlich ist nur die Status-Page.
-status.{$INFRANODE_PUBLIC_DOMAIN} {
+status.{$publicDomain} {
 	encode zstd gzip
 
 	tls {
-		dns cloudflare {env.INFRANODE_CF_DNS_TOKEN}
+		dns cloudflare {env.cfDnsToken}
 		resolvers 1.1.1.1
 	}
 
@@ -36,11 +36,11 @@ status.{$INFRANODE_PUBLIC_DOMAIN} {
 # anderen Bloecke. MCP nutzt JSON-RPC ueber HTTP + SSE; reverse_proxy reicht den
 # SSE-Stream automatisch durch (der Server sendet x-accel-buffering:no, was auch
 # Cloudflare das Buffern abschaltet).
-mcp.{$INFRANODE_PUBLIC_DOMAIN} {
+mcp.{$publicDomain} {
 	encode zstd gzip
 
 	tls {
-		dns cloudflare {env.INFRANODE_CF_DNS_TOKEN}
+		dns cloudflare {env.cfDnsToken}
 		resolvers 1.1.1.1
 	}
 
@@ -56,7 +56,7 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 	}
 	handle @browser {
 		header Content-Type "text/plain; charset=utf-8"
-		respond "Atlas MCP server. Connect with an MCP client (streamable HTTP) at /mcp, e.g.: claude mcp add --transport http atlas https://{$INFRANODE_PUBLIC_DOMAIN}/mcp" 200
+		respond "Atlas MCP server. Connect with an MCP client (streamable HTTP) at /mcp, e.g.: claude mcp add --transport http atlas https://{$publicDomain}/mcp" 200
 	}
 
 	# Trailing-Slash-Toleranz (Directory-Review 2026-07-10): /mcp/ intern auf
@@ -77,7 +77,7 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 			> archived data for the largest German cities, from licensed official
 			> sources with per-record attribution. Keyless and read-only.
 
-			Endpoint: https://mcp.{$INFRANODE_PUBLIC_DOMAIN}/mcp
+			Endpoint: https://mcp.{$publicDomain}/mcp
 			LLMS 200
 	}
 
@@ -104,11 +104,11 @@ mcp.{$INFRANODE_PUBLIC_DOMAIN} {
 # Cert via DNS-01 (Cloudflare) wie die anderen Bloecke. ntfy nutzt WebSockets fuer den
 # Live-Nachrichten-Stream; reverse_proxy reicht das Upgrade automatisch durch.
 # NTFY_AUTH_DEFAULT_ACCESS=deny-all haelt den Server ohne angelegten User/Token dicht.
-ntfy.{$INFRANODE_PUBLIC_DOMAIN} {
+ntfy.{$publicDomain} {
 	encode zstd gzip
 
 	tls {
-		dns cloudflare {env.INFRANODE_CF_DNS_TOKEN}
+		dns cloudflare {env.cfDnsToken}
 		resolvers 1.1.1.1
 	}
 

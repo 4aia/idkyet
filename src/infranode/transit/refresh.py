@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> None:
     if not dest_path:
         print(
             "Kein GTFS-ZIP-Zielpfad. Nutzung: python -m infranode.transit.refresh "
-            "<ziel.zip> oder INFRANODE_GTFS_RT_STATIC_PATH setzen.",
+            "<ziel.zip> oder gtfsRtStaticPath setzen.",
             file=sys.stderr,
         )
         sys.exit(2)

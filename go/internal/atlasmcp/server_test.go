@@ -19,7 +19,7 @@ func connect(t *testing.T, mux *http.ServeMux) *mcp.ClientSession {
 	t.Helper()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	t.Setenv("INFRANODE_MCP_API_BASE", srv.URL)
+	t.Setenv("mcpApiBase", srv.URL)
 
 	api, err := atlasapi.New()
 	if err != nil {

@@ -4,9 +4,9 @@ Eine Quelle der Wahrheit für den Pfad der committeten Seeds (REST-Regel 6,
 keine Duplikate). Früher lösten ``collector/plan.py``, ``mappers/holidays.py``,
 ``registry/cities.py`` und ``export/enrich.py`` den Pfad je einzeln per
 ``Path(__file__).resolve().parents[...] / "data" / "seeds"`` auf und ignorierten
-dabei ``INFRANODE_SEEDS_DIR`` (Live-Report 2026-06-12, M1): im Prod-Container
+dabei ``seedsDir`` (Live-Report 2026-06-12, M1): im Prod-Container
 verschattet das Named Volume ``infranode_data`` den Pfad ``/app/data``, weshalb
-das Dockerfile die Seeds nach ``/app/seeds`` legt und ``INFRANODE_SEEDS_DIR``
+das Dockerfile die Seeds nach ``/app/seeds`` legt und ``seedsDir``
 darauf setzt. Wurde der Env-Override ignoriert, fehlten Seeds (holidays no_data,
 56 fehlende Städte aus registry_extended.json).
 
@@ -28,11 +28,11 @@ _REPO_SEED_DIR = Path(__file__).resolve().parents[3] / "data" / "seeds"
 def seeds_dir() -> Path:
     """Loest das Seed-Verzeichnis lazy auf (Env-Override gewinnt, sonst Repo-Layout).
 
-    ``INFRANODE_SEEDS_DIR`` (Prod-Container: ``/app/seeds``) hat Vorrang; ohne
+    ``seedsDir`` (Prod-Container: ``/app/seeds``) hat Vorrang; ohne
     gesetzten Override gilt das Repo-Layout (lokal, Tests). Wird bei jedem Aufruf
     frisch aus ``os.environ`` gelesen, damit per-Test gesetzte Overrides greifen.
     """
-    override = os.environ.get("INFRANODE_SEEDS_DIR")
+    override = os.environ.get("seedsDir")
     if override:
         return Path(override)
     return _REPO_SEED_DIR

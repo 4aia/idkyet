@@ -10,7 +10,7 @@ Eigenschaften:
 
 - NUR Limit-Bypass, KEINE Authentifizierung/Autorisierung: eine allowlistete IP
   bekommt keinerlei zusätzliche Rechte, sie wird lediglich nicht gedrosselt.
-- ENV-konfigurierbar ohne Code-Deploy: ``INFRANODE_RATELIMIT_ALLOWLIST`` als
+- ENV-konfigurierbar ohne Code-Deploy: ``ratelimitAllowlist`` als
   kommagetrennte CIDR-Liste (v4/v6 gemischt; nackte IPs zählen als /32 bzw.
   /128). Leer (Default) = Feature aus = bisheriges Verhalten.
 - FAIL-SAFE: leere oder unparsebare Konfiguration allowlistet NIEMANDEN.
@@ -34,10 +34,10 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# Gemeinsamer Env-Name: identisch mit dem pydantic-Settings-Feld
-# ``ratelimit_allowlist`` (Prefix INFRANODE_), damit EINE Variable API- und
-# MCP-Container gleichermaßen konfiguriert.
-ENV_VAR = "INFRANODE_RATELIMIT_ALLOWLIST"
+# Gemeinsamer Env-Name: identisch mit dem camelCase-Alias des pydantic-Settings-
+# Felds ``ratelimit_allowlist``, damit EINE Variable API- und MCP-Container
+# gleichermaßen konfiguriert.
+ENV_VAR = "ratelimitAllowlist"
 
 _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 

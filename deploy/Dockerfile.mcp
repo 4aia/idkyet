@@ -33,12 +33,12 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
 
 # Remote-Transport per Default; der Compose-Service setzt zusaetzlich
-# INFRANODE_MCP_API_BASE auf die interne api.
+# mcpApiBase auf die interne api.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
-    INFRANODE_MCP_TRANSPORT="streamable-http" \
-    INFRANODE_MCP_HOST="0.0.0.0" \
-    INFRANODE_MCP_PORT="8081"
+    mcpTransport="streamable-http" \
+    mcpHost="0.0.0.0" \
+    mcpPort="8081"
 
 USER app
 EXPOSE 8081

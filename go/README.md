@@ -10,7 +10,7 @@ REST API.
 ## Layout
 
 - `cmd/atlas-mcp` — entrypoint; picks stdio vs. streamable-http via
-  `INFRANODE_MCP_TRANSPORT`.
+  `mcpTransport`.
 - `internal/atlasapi` — the loopback HTTP client (mirrors `mcp/client.py`):
   base-URL host allowlist, resource/collection/live-resource allowlists,
   slug/EVA validation, graceful 5xx-to-envelope handling.
@@ -24,11 +24,11 @@ REST API.
 
 ```bash
 go run ./cmd/atlas-mcp                                   # stdio, against localhost:8000
-INFRANODE_MCP_API_BASE=http://localhost:8000/api/v1 \
+mcpApiBase=http://localhost:8000/api/v1 \
   go run ./cmd/atlas-mcp                                  # explicit API base
 
-INFRANODE_MCP_TRANSPORT=streamable-http \
-INFRANODE_MCP_PORT=8081 \
+mcpTransport=streamable-http \
+mcpPort=8081 \
   go run ./cmd/atlas-mcp                                  # remote endpoint on :8081
 ```
 
@@ -47,9 +47,9 @@ running Python API.
 
 - **Rate limiting is process-local.** The Python server shares its
   moving-window budget across replicas via Redis
-  (`INFRANODE_REDIS_URL`); this one doesn't yet. Fine for a single instance,
+  (`redisUrl`); this one doesn't yet. Fine for a single instance,
   revisit before scaling horizontally.
-- **`INFRANODE_MCP_BACKLOG`/keep-alive tuning** from the Python side's
+- **`mcpBacklog`/keep-alive tuning** from the Python side's
   uvicorn config isn't ported; Go's `net/http` defaults are used instead.
 - The `Dockerfile` here hasn't been build-verified in this environment (no
   Docker daemon available) — check it builds before relying on it in

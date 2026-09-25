@@ -39,7 +39,7 @@ Dies ist das wichtigste Vertrauenssignal, daher zuerst:
 Konkrete Schutzmechanismen im Code (`src/infranode/mcp/client.py`):
 
 - **SSRF-Gate (T-12-MCP-SSRF):** Die Ziel-URL stammt ausschließlich aus der Env
-  `INFRANODE_MCP_API_BASE`. Ihr Host wird gegen eine enge Allowlist geprüft
+  `mcpApiBase`. Ihr Host wird gegen eine enge Allowlist geprüft
   (`localhost`, `127.0.0.1`, `::1`, `api`); ein nicht-allowlisteter Host wird mit
   `ValueError` abgewiesen, bevor ein Request rausgeht. Tool-Argumente können keine
   beliebige URL erzwingen.
@@ -51,7 +51,7 @@ Konkrete Schutzmechanismen im Code (`src/infranode/mcp/client.py`):
 - **Endlicher Timeout:** 30 s pro Aufruf, kein hängender Agent.
 - **Rate-Limit (Remote, `src/infranode/mcp/ratelimit.py`):** Der öffentliche
   Streamable-HTTP-Endpunkt drosselt pro echter Client-IP (CF-Connecting-IP) mit
-  einem Moving-Window (Default 480/Minute, per `INFRANODE_MCP_RATE_LIMIT`
+  einem Moving-Window (Default 480/Minute, per `mcpRateLimit`
   einstellbar). Überschreitung liefert HTTP 429 mit `Retry-After`. Der lokale
   stdio-Transport ist davon unberührt (kein offener Port).
 
@@ -108,7 +108,7 @@ Eintrag in `claude_desktop_config.json` unter `mcpServers`. Pfad:
       "command": "uv",
       "args": ["run", "--group", "mcp", "python", "-m", "infranode.mcp"],
       "env": {
-        "INFRANODE_MCP_API_BASE": "http://localhost:8000/api/v1"
+        "mcpApiBase": "http://localhost:8000/api/v1"
       }
     }
   }
@@ -454,7 +454,7 @@ Primärer Transport ist stdio: der Server läuft als lokaler Subprozess des
 Clients und öffnet keinen Netzwerk-Port. Tool-Aufrufe gehen ausschließlich an die
 konfigurierte, allowlistete Base-URL. Der Remote-Endpunkt
 (`https://mcp.woof.systems/mcp`) nutzt streamable-http hinter Caddy/Cloudflare,
-keylos wie die interne API, aktiviert per `INFRANODE_MCP_TRANSPORT=streamable-http`.
+keylos wie die interne API, aktiviert per `mcpTransport=streamable-http`.
 
 ## Lizenz und Provenance
 

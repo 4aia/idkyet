@@ -6,7 +6,7 @@
 //
 // Security posture (same two gates as the Python client):
 //
-//   - SSRF gate: the base URL comes exclusively from the INFRANODE_MCP_API_BASE
+//   - SSRF gate: the base URL comes exclusively from the mcpApiBase
 //     env var (default http://localhost:8000/api/v1) and its host is checked
 //     against an allowlist before any request is built.
 //   - Injection gate: resource/collection/live-resource names are checked
@@ -160,16 +160,16 @@ func New() (*Client, error) {
 }
 
 func baseURL() (string, error) {
-	raw := os.Getenv("INFRANODE_MCP_API_BASE")
+	raw := os.Getenv("mcpApiBase")
 	if raw == "" {
 		raw = defaultBaseURL
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("invalid INFRANODE_MCP_API_BASE %q: %w", raw, err)
+		return "", fmt.Errorf("invalid mcpApiBase %q: %w", raw, err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("invalid scheme for INFRANODE_MCP_API_BASE: %q, only http/https allowed", u.Scheme)
+		return "", fmt.Errorf("invalid scheme for mcpApiBase: %q, only http/https allowed", u.Scheme)
 	}
 	if !AllowedHosts[u.Hostname()] {
 		hosts := make([]string, 0, len(AllowedHosts))

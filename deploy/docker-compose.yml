@@ -33,7 +33,7 @@ services:
       - infranode_data:/app/data
     environment:
       # Service-Name-DNS im Compose-Netz; ueberschreibt einen evtl. abweichenden .env-Wert.
-      INFRANODE_REDIS_URL: redis://redis:6379/0
+      redisUrl: redis://redis:6379/0
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health').status==200 else 1)"]
       interval: 10s

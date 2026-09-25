@@ -21,7 +21,7 @@ breitengrad-korrigierte Grad-Distanz (kein Haversine, Don't-Hand-Roll, vgl.
 ``uba._deg_distance``).
 
 Sicherheit (T-07-IN, SSRF): Der Host ``base_url`` ist operator-konfigurierbar
-(``INFRANODE_DWD_FIRE_BASE_URL``), aber kein User-Input; die Layer-IDs und
+(``dwdFireBaseUrl``), aber kein User-Input; die Layer-IDs und
 ``outFields`` sind hartkodiert. Der GLFI-Abruf ist best-effort (ein Ausfall
 laesst den WBI unberuehrt); der WBI-Abruf nutzt ``raise_for_status`` (5xx ->
 ``httpx.HTTPError`` -> STALE-ON-ERROR der Fassade).

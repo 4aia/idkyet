@@ -95,10 +95,10 @@ MCP-Server gegen die lokale API starten:
 
 ```bash
 uv sync --group mcp
-INFRANODE_MCP_API_BASE=http://localhost/api/v1 uv run python -m infranode.mcp.server
+mcpApiBase=http://localhost/api/v1 uv run python -m infranode.mcp.server
 ```
 
-Alle Einstellungen laufen über das Env-Präfix `INFRANODE_` (siehe
+Alle Einstellungen sind einfache camelCase-Variablen ohne Prefix (siehe
 `.env.example`). Echte Secrets landen nie im Repo, versioniert ist nur
 `.env.example`.
 

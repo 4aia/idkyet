@@ -8,7 +8,7 @@ geparste JSON unverändert zurück (keine Mapping-/Lizenz-Logik, D-07/D-08).
 Sicherheit:
 
 - T-12-MCP-SSRF: Die Base-URL stammt ausschließlich aus der Env
-  ``INFRANODE_MCP_API_BASE`` (Default ``http://localhost:8000/api/v1``). Ihr Host
+  ``mcpApiBase`` (Default ``http://localhost:8000/api/v1``). Ihr Host
   wird gegen eine Allowlist geprüft; ein nicht-allowlisteter Host wird mit
   ``ValueError`` abgelehnt, bevor ein Request rausgeht. Eine arbitrary URL aus
   Tool-Argumenten ist nicht möglich.
@@ -345,14 +345,14 @@ def _base_url() -> str:
     Löst ``ValueError`` aus, wenn das Schema nicht http/https ist oder der Host
     nicht in ``ALLOWED_HOSTS`` liegt (T-12-MCP-SSRF).
     """
-    # Basis-URL aus INFRANODE_MCP_API_BASE, sonst Default. So
+    # Basis-URL aus mcpApiBase, sonst Default. So
     # funktioniert die nach außen dokumentierte Variable, ohne den bestehenden
     # Env-Vertrag zu brechen.
-    raw = os.environ.get("INFRANODE_MCP_API_BASE", _DEFAULT_BASE_URL)
+    raw = os.environ.get("mcpApiBase", _DEFAULT_BASE_URL)
     parts = urlsplit(raw)
     if parts.scheme not in ("http", "https"):
         raise ValueError(
-            f"Ungueltiges Schema fuer INFRANODE_MCP_API_BASE: "
+            f"Ungueltiges Schema fuer mcpApiBase: "
             f"{parts.scheme!r}. Erlaubt sind nur http/https."
         )
     if parts.hostname not in ALLOWED_HOSTS:

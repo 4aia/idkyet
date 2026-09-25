@@ -11,8 +11,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/atlas-mcp ./cmd/at
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/atlas-mcp /atlas-mcp
-ENV INFRANODE_MCP_TRANSPORT=streamable-http \
-    INFRANODE_MCP_HOST=0.0.0.0 \
-    INFRANODE_MCP_PORT=8081
+ENV mcpTransport=streamable-http \
+    mcpHost=0.0.0.0 \
+    mcpPort=8081
 EXPOSE 8081
 ENTRYPOINT ["/atlas-mcp"]

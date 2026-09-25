@@ -40,7 +40,7 @@ COPY --from=builder /app/src /app/src
 
 # Konfigurations-Seeds an einen Pfad AUSSERHALB des Daten-Volumes legen
 # (CR-01): das Prod-Volume infranode_data mountet auf /app/data und wuerde dort
-# liegende Seeds verschatten. Gelesen ueber INFRANODE_SEEDS_DIR.
+# liegende Seeds verschatten. Gelesen ueber seedsDir.
 COPY data/seeds /app/seeds
 
 # OpenAPI-first-Vertrag: api/v1/openapi.py liest docs/openapi.yaml beim Import
@@ -48,10 +48,10 @@ COPY data/seeds /app/seeds
 COPY docs/openapi.yaml /app/docs/openapi.yaml
 
 # venv-Binaries (uvicorn) in den PATH; Quellen importierbar machen.
-# INFRANODE_SEEDS_DIR zeigt auf die ins Image kopierten Seeds (volume-frei).
+# seedsDir zeigt auf die ins Image kopierten Seeds (volume-frei).
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
-    INFRANODE_SEEDS_DIR="/app/seeds"
+    seedsDir="/app/seeds"
 
 USER app
 EXPOSE 8000

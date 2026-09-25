@@ -31,24 +31,24 @@ func TestValidateSlug(t *testing.T) {
 }
 
 func TestBaseURLAllowlist(t *testing.T) {
-	t.Setenv("INFRANODE_MCP_API_BASE", "http://localhost:8000/api/v1")
+	t.Setenv("mcpApiBase", "http://localhost:8000/api/v1")
 	if _, err := baseURL(); err != nil {
 		t.Fatalf("expected allowlisted host to pass, got: %v", err)
 	}
 
-	t.Setenv("INFRANODE_MCP_API_BASE", "http://evil.example/api/v1")
+	t.Setenv("mcpApiBase", "http://evil.example/api/v1")
 	if _, err := baseURL(); err == nil {
 		t.Fatal("expected non-allowlisted host to be rejected")
 	}
 
-	t.Setenv("INFRANODE_MCP_API_BASE", "ftp://localhost/api/v1")
+	t.Setenv("mcpApiBase", "ftp://localhost/api/v1")
 	if _, err := baseURL(); err == nil {
 		t.Fatal("expected non-http(s) scheme to be rejected")
 	}
 }
 
 func TestGetResourceRejectsUnknownResource(t *testing.T) {
-	t.Setenv("INFRANODE_MCP_API_BASE", "http://localhost:8000/api/v1")
+	t.Setenv("mcpApiBase", "http://localhost:8000/api/v1")
 	c, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestGetResourceRejectsUnknownResource(t *testing.T) {
 }
 
 func TestGetStationBoardValidatesEva(t *testing.T) {
-	t.Setenv("INFRANODE_MCP_API_BASE", "http://localhost:8000/api/v1")
+	t.Setenv("mcpApiBase", "http://localhost:8000/api/v1")
 	c, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestRequestRoundTripAndGracefulErrorEnvelope(t *testing.T) {
 	defer srv.Close()
 
 	// httptest server runs on 127.0.0.1, which is allowlisted.
-	t.Setenv("INFRANODE_MCP_API_BASE", srv.URL)
+	t.Setenv("mcpApiBase", srv.URL)
 	c, err := New()
 	if err != nil {
 		t.Fatal(err)

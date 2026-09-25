@@ -505,8 +505,8 @@ def create_app() -> FastAPI:
     # hart beim Start abbrechen statt erst beim ersten Login.
     if bool(settings.admin_password) != bool(settings.admin_session_secret):
         raise RuntimeError(
-            "Admin-Teilkonfiguration: INFRANODE_ADMIN_PASSWORD und "
-            "INFRANODE_ADMIN_SESSION_SECRET muessen BEIDE gesetzt oder BEIDE "
+            "Admin-Teilkonfiguration: adminPassword und "
+            "adminSessionSecret muessen BEIDE gesetzt oder BEIDE "
             "leer sein (fail-closed)."
         )
 

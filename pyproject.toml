@@ -1,5 +1,5 @@
 [project]
-name = "atlas"
+name = "infranode"
 version = "1.0.0"
 description = "Atlas: proprietaere Proxy-REST-API fuer offene Daten deutscher Staedte"
 authors = [

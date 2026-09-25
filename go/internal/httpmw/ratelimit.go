@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	allowlistEnvVar = "INFRANODE_RATELIMIT_ALLOWLIST"
-	rateLimitEnvVar = "INFRANODE_MCP_RATE_LIMIT"
+	allowlistEnvVar = "ratelimitAllowlist"
+	rateLimitEnvVar = "mcpRateLimit"
 	defaultLimit    = 480
 	defaultWindow   = time.Minute
 )
@@ -130,7 +130,7 @@ func (l *limiter) allow(key string) bool {
 }
 
 // parseRateLimitEnv parses the "<N>/<unit>" format used by
-// INFRANODE_MCP_RATE_LIMIT (limits-library format on the Python side), e.g.
+// mcpRateLimit (limits-library format on the Python side), e.g.
 // "480/minute". Falls back to the default on any parse failure.
 func parseRateLimitEnv(raw string) (int, time.Duration) {
 	parts := strings.SplitN(raw, "/", 2)
@@ -158,7 +158,7 @@ func parseRateLimitEnv(raw string) (int, time.Duration) {
 }
 
 // RateLimit rate-limits requests per real client IP (moving window), unless
-// the IP is covered by INFRANODE_RATELIMIT_ALLOWLIST. On top of that, it
+// the IP is covered by ratelimitAllowlist. On top of that, it
 // stashes the client IP in the request context (atlasapi.WithClientIP) so
 // downstream tool calls can forward it to the REST API for
 // dashboard/alerting provenance (best-effort, not an auth mechanism).

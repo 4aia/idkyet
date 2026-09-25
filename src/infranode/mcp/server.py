@@ -13,8 +13,8 @@ Es gibt KEINE Mapping-/Lizenz-Logik im Server: jedes Tool ruft über
 normalisiertes JSON 1:1 zurück (D-07/D-08). Zwei Transporte:
 - stdio (Default): lokaler Subprozess für Claude Desktop/Code.
 - streamable-http: öffentlicher Remote-Endpunkt (z.B. mcp.woof.systems),
-  hinter Caddy/Cloudflare, keylos wie die API. Per INFRANODE_MCP_TRANSPORT
-  =streamable-http aktiviert; INFRANODE_MCP_API_BASE zeigt dann auf die
+  hinter Caddy/Cloudflare, keylos wie die API. Per mcpTransport
+  =streamable-http aktiviert; mcpApiBase zeigt dann auf die
   öffentliche API (https://<rest-api-domain>/api/v1).
 """
 
@@ -430,32 +430,32 @@ def run() -> None:
     """Startet den Server im per Env gewählten Transport.
 
     stdio (Default): kein offener Port, lokaler Subprozess. streamable-http:
-    bindet einen HTTP-Port (INFRANODE_MCP_HOST/-PORT) für den öffentlichen
+    bindet einen HTTP-Port (mcpHost/-PORT) für den öffentlichen
     Remote-Endpunkt. Host-Default 127.0.0.1; der Container-Service setzt
-    INFRANODE_MCP_HOST=0.0.0.0, damit Caddy ihn über das Compose-Netz erreicht.
+    mcpHost=0.0.0.0, damit Caddy ihn über das Compose-Netz erreicht.
     """
-    transport = os.environ.get("INFRANODE_MCP_TRANSPORT", "stdio")
+    transport = os.environ.get("mcpTransport", "stdio")
     if transport == "streamable-http":
         from mcp.server.transport_security import TransportSecuritySettings
 
-        mcp.settings.host = os.environ.get("INFRANODE_MCP_HOST", "127.0.0.1")
-        mcp.settings.port = int(os.environ.get("INFRANODE_MCP_PORT", "8081"))
+        mcp.settings.host = os.environ.get("mcpHost", "127.0.0.1")
+        mcp.settings.port = int(os.environ.get("mcpPort", "8081"))
         # Der MCP-Transport hat einen DNS-Rebinding-Schutz, der per Default nur
         # localhost-Hosts/-Origins erlaubt (gedacht für lokal gebundene Server).
         # Hinter Caddy/Cloudflare variieren Host/Origin; für eine öffentliche,
         # keylose read-only API ist der Schutz nicht nötig und blockt sonst alle
         # Calls (HTTP 421). Default daher aus; per
-        # INFRANODE_MCP_DNS_REBINDING_PROTECTION=1 mit expliziten Allowlists
-        # (INFRANODE_MCP_ALLOWED_HOSTS/-ORIGINS, kommagetrennt) wieder scharf.
-        if os.environ.get("INFRANODE_MCP_DNS_REBINDING_PROTECTION") == "1":
+        # mcpDnsRebindingProtection=1 mit expliziten Allowlists
+        # (mcpAllowedHosts/-ORIGINS, kommagetrennt) wieder scharf.
+        if os.environ.get("mcpDnsRebindingProtection") == "1":
             hosts = [
                 h.strip()
-                for h in os.environ.get("INFRANODE_MCP_ALLOWED_HOSTS", "").split(",")
+                for h in os.environ.get("mcpAllowedHosts", "").split(",")
                 if h.strip()
             ]
             origins = [
                 o.strip()
-                for o in os.environ.get("INFRANODE_MCP_ALLOWED_ORIGINS", "").split(",")
+                for o in os.environ.get("mcpAllowedOrigins", "").split(",")
                 if o.strip()
             ]
             mcp.settings.transport_security = TransportSecuritySettings(

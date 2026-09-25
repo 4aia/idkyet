@@ -886,11 +886,11 @@ async def city_overview(slug: str, request: Request) -> dict:
 
     # Stufe 2: Live-Highlights parallel + zeitgedeckelt (hängt nie). Bei
     # Budget-Überschreitung liefern noch offene Highlights ehrlich "error".
-    # Budget per INFRANODE_OVERVIEW_SNAPSHOT_BUDGET überschreibbar (Default 3s);
+    # Budget per overviewSnapshotBudget überschreibbar (Default 3s);
     # bei Überschreitung liefern noch offene Highlights ehrlich "error", der
     # Overview antwortet trotzdem sofort (hängt nie).
     budget = float(
-        os.environ.get("INFRANODE_OVERVIEW_SNAPSHOT_BUDGET", _SNAPSHOT_BUDGET_SECONDS)
+        os.environ.get("overviewSnapshotBudget", _SNAPSHOT_BUDGET_SECONDS)
     )
 
     async def _bounded(name: str, coro) -> tuple[str, dict]:
@@ -4660,7 +4660,7 @@ def _regio_configured() -> bool:
     """
     s = Settings()
     # SecretStr-Objekte sind immer truthy -> den eigentlichen Wert prüfen, damit
-    # ein leer gesetzter Key (INFRANODE_REGIO_USER="") als "fehlt" gilt.
+    # ein leer gesetzter Key (regioUser="") als "fehlt" gilt.
     user = s.regio_user.get_secret_value() if s.regio_user else None
     pw = s.regio_pass.get_secret_value() if s.regio_pass else None
     return bool(s.enable_regionalstatistik and user and pw)
@@ -5218,7 +5218,7 @@ async def city_fuel_prices(slug: str, request: Request) -> dict:
     settings = Settings()
     key = settings.tankerkoenig_key
     # disabled: Toggle aus ODER kein (leerer) Key (analog hvv_geofox). Ein leerer
-    # Env-String INFRANODE_TANKERKOENIG_KEY="" ist KEIN None -> ``get_secret_value``
+    # Env-String tankerkoenigKey="" ist KEIN None -> ``get_secret_value``
     # zusätzlich prüfen, damit der Guard deterministisch greift.
     if not settings.enable_tankerkoenig or key is None or not key.get_secret_value():
         return {

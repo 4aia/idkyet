@@ -109,7 +109,6 @@ _TOOL_TITLES: dict[str, str] = {
     "get_city_resource": "City Data by Type",
     "air_quality": "Air Quality",
     "weather": "Weather",
-    "pois": "Points of Interest",
     "station_board_departures": "Station Board: Departures",
     "station_board_arrivals": "Station Board: Arrivals",
     "transit_departures": "Transit Departures",
@@ -186,12 +185,10 @@ _register(tools.get_city_resource)
 # der Werkzeugauswahl); alles Weitere laeuft ueber get_city_resource.
 _register(tools.air_quality)
 _register(tools.weather)
-# Parametrisierte Faehigkeiten (echte Eigenlogik, kein reiner Slug-Wrapper):
-_register(tools.pois)
 # DATA-36: Per-Bahnhof-Live-Boards (jede EVA, alle Gattungen inkl. Nahverkehr).
 _register(tools.station_board_departures)
 _register(tools.station_board_arrivals)
-# DATA-26: Echtzeit-Abfahrten je Haltestelle (stop_id aus resource='transit').
+# DATA-26: Echtzeit-Abfahrten je Haltestelle (GTFS-RT/HVV/VGN, stop_id noetig).
 _register(tools.transit_departures)
 # Meta-Tools: beschreiben die eigene Abdeckung -> geschlossene Domäne
 # (open_world=False).
@@ -356,10 +353,9 @@ async def catalog_resource() -> dict:
                 "station boards (station_departures/station_arrivals) the "
                 "deprecated stop_id is now trip_stop_id: it identifies one stop "
                 "of one train run and is NOT a station/stop id, so never pass it "
-                "to transit_departures (that one needs the DELFI id from "
-                "get_city_resource(slug, resource='transit')). In the station "
-                "catalog the DB station category is station_category (a number); "
-                "the deprecated category carried the same value."
+                "to transit_departures. In the station catalog the DB station "
+                "category is station_category (a number); the deprecated "
+                "category carried the same value."
             ),
         },
     }

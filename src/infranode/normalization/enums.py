@@ -110,12 +110,8 @@ class SourceId(StrEnum):
 
     WIKIDATA = "wikidata"
     DWD = "dwd"
-    OSM = "osm"
     AUTOBAHN = "autobahn"
-    BNETZA = "bnetza"
     UBA = "uba"
-    DELFI = "delfi"
-    HVV = "hvv"
     # Phase 7: Tier-A-Quellen (E-Mobilität und erweiterte Umweltdaten).
     # LHP = Landeshochwasserportale (www.hochwasserzentralen.de); seit 2026-08-01
     # ist Toggle-Name == SourceId-Wert == "lhp" (frueher Record-Tag "hochwasser").
@@ -130,17 +126,11 @@ class SourceId(StrEnum):
     KLINIK_ATLAS = "klinik_atlas"
     # DB FaSta Aufzug-/Rolltreppen-Status (key-gated DB-Marketplace, CC-BY, Tier A).
     DB_FASTA = "db_fasta"
-    # Phase 8: Statistik-, Energie- und Geo-Quellen. GENESIS und
-    # ZENSUS sind account-gated (POST-API), MASTR/BKG/BUNDESWAHL/HOLIDAYS sind
-    # keylose Bulk-/Seed-Quellen. Alle Werte ASCII (StrEnum).
+    # Phase 8: Statistik-, Energie- und Geo-Quellen. GENESIS ist account-gated
+    # (POST-API). Alle Werte ASCII (StrEnum).
     GENESIS = "genesis"
-    ZENSUS = "zensus"
-    MASTR = "mastr"
     SMARD = "smard"
     DWD_WARNINGS = "dwd_warnings"
-    BKG = "bkg"
-    BUNDESWAHL = "bundeswahl"
-    HOLIDAYS = "holidays"
     # Phase 9: keylose Stadt-Verkehrs-Quellen (Baustellen/Sperrungen) je Stadt.
     # Alle Werte ASCII (StrEnum), kein Umlaut (Slugs muenchen/koeln). Toggle-Name
     # == SourceId-Wert == _KNOWN_SOURCES-Eintrag. Webcams nutzen weiterhin
@@ -241,15 +231,6 @@ class SourceId(StrEnum):
     # HVV_GEOFOX (Tier C, nicht offen) sauber verwertbar. KEINE Mobilithek.
     # Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag.
     HAMBURG_TRAFFIC_SITUATION = "hamburg_traffic_situation"
-    # DATA-27: KBA Pkw-Bestand + Elektro-Anteil je Zulassungsbezirk (keylose
-    # Bulk-Quelle, DL-DE/BY 2.0, Tier A). Read-only Store-Lesung im Request-Pfad
-    # (wie MASTR), kein resilient_client. Toggle-Name == SourceId-Wert ==
-    # _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
-    KBA = "kba"
-    # DATA-29: Unfallatlas (Straßenverkehrsunfälle je Kreis, keylose Bulk-CSV,
-    # DL-DE/BY 2.0, Tier A). Read-only Store-Lesung (wie KBA/MASTR), kein
-    # resilient_client. Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag.
-    UNFALLATLAS = "unfallatlas"
     # DATA-30: Tankerkönig Spritpreise (MTS-K), aggregiert je Stadt. Keyed Live-
     # Quelle (resilient_client), CC-BY 4.0 = Tier A (offen, verwertbar). Toggle-
     # Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag: getattr(settings,
@@ -272,22 +253,6 @@ class SourceId(StrEnum):
     # geprüft (GOV-02/04). Keyed-los, resilient_client. Toggle-Name == SourceId-
     # Wert == _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
     GBFS = "gbfs"
-    # DATA-32: INKAR/BBSR sozialökonomische Indikatoren je Kreis (keylose Bulk-
-    # Quelle, DL-DE/BY 2.0, Tier A). Read-only Store-Lesung im Request-Pfad (wie
-    # KBA/UNFALLATLAS), kein resilient_client. Toggle-Name == SourceId-Wert ==
-    # _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
-    INKAR = "inkar"
-    # Wegweiser Kommune der Bertelsmann Stiftung (keylose Bulk-Quelle, CC0,
-    # Tier A). Anders als INKAR gemeindescharf und mit ZEITREIHEN (2006-2040)
-    # statt Einzelwerten. Read-only Store-Lesung im Request-Pfad (wie INKAR),
-    # kein resilient_client. Toggle-Name == SourceId-Wert ==
-    # _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
-    WEGWEISER = "wegweiser"
-    # PKS-01: BKA Polizeiliche Kriminalstatistik je Kreis (keylose Bulk-XLSX,
-    # DL-DE/BY 2.0, Tier A). Read-only Store-Lesung im Request-Pfad (wie KBA/
-    # UNFALLATLAS), kein resilient_client. Toggle-Name == SourceId-Wert ==
-    # _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
-    BKA_PKS = "bka_pks"
     # DATA-34: DB Timetables (Live-Abfahrtstafel Metropolen-Hbf inkl. Fernverkehr +
     # Echtzeit-Verspätung). Keyed Live-Quelle (resilient_client, Header-Auth),
     # CC-BY 4.0 = Tier A. Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag;
@@ -306,26 +271,12 @@ class SourceId(StrEnum):
     # Marketplace wie DB_TIMETABLES (gleiche db_client_id/db_api_key), CC BY 4.0 =
     # Tier A. Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag.
     STADA = "stada"
-    # DATA-37: Regionalstatistik.de (GENESIS-Webservice der Statistischen Ämter):
-    # Realsteuer-Hebesätze (71231, GEMEINDE-genau) + Gewerbean-/-abmeldungen
-    # (52311, KREIS-genau). Bulk-Ingest -> SQLite (kein Live-Call im Request-Pfad,
-    # wie INKAR/BORIS), aber die GENESIS-API verlangt seit 05/2025 eine
-    # Registrierung (Header-Auth username/password, NUR im Ingest, regio_user/
-    # regio_pass). Lizenz DL-DE/BY 2.0 = Tier A (DL_DE_BY_2_0 existiert bereits).
-    # Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag.
-    REGIONALSTATISTIK = "regionalstatistik"
     # DATA-38 (Stufe 1): PVGIS-Solar-Einstrahlung + normierter PV-Ertrag je Stadt
     # (EU JRC, keylose Live-Rechen-API re.jrc.ec.europa.eu PVcalc). PVGIS rechnet
     # jede EU-Koordinate -> alle Register-Städte ohne Stadt-Allowlist. EU-Reuse-
     # Policy (EC_REUSE) = Tier A. Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-
     # Eintrag: getattr(settings, f"enable_{name}").
     SOLAR = "solar"
-    # DATA-39 (Stufe 2): Dach-Solarkataster je Stadt (installiertes + installierbares
-    # PV-Potenzial je Gemeinde). Föderiert je Bundesland wie BORIS; NRW-Pilot aus dem
-    # amtlichen Gemeinde-Aggregat (Solarkataster NRW, MaStR/LANUK/Geobasis NRW,
-    # DL-DE/Zero 2.0 = Tier A). Seed-basiert (kein Live-Fremd-API). Toggle-Name ==
-    # SourceId-Wert == _KNOWN_SOURCES-Eintrag: getattr(settings, f"enable_{name}").
-    SOLAR_CADASTRE = "solar_cadastre"
     # DATA-40: München Open Data, statische/halbstatische Stadtquellen via CKAN
     # (opendata.muenchen.de, DL-DE/BY 2.0 = Tier A). PARKHÄUSER = Parkhaus-
     # Standortkatalog (KEINE Live-Belegung); RADZÄHL = Raddauerzählstellen
@@ -381,15 +332,6 @@ class SourceId(StrEnum):
     # (NUTS-3/PLZ). Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag:
     # getattr(settings, f"enable_{name}"). Wert ASCII (StrEnum), kein Umlaut.
     OEFFENTLICHEVERGABE = "oeffentlichevergabe"
-    # DATA-41: Fernwärme-/Wärmenetz-Versorgung je Stadt aus der kommunalen
-    # Wärmeplanung. Föderiert je Stadt-WFS (wie BORIS/solar-roofs, je Ursprung
-    # lizenzverifiziert): Berlin = Energienetze-WFS (Fernwärme-Netzgebiet inkl.
-    # 250 m Puffer, DL-DE/Zero 2.0); Hamburg = WFS "Gebiete mit Wärmenetz" der
-    # kommunalen Wärmeplanung (DL-DE/BY 2.0). Beide Tier A. Batch-Ingest -> Archiv
-    # (kein WFS-Call im Request-Pfad, wie bnetza), Route liest read-only. Lizenz/
-    # Attribution stehen je Stadt im Record (Mapper liest sie aus der WFS-Registry).
-    # Toggle-Name == SourceId-Wert == _KNOWN_SOURCES-Eintrag.
-    DISTRICT_HEATING = "district_heating"
     # Quick-260705-jgt: Koeln Behoerden-Wartezeiten (office-wait-times). Keyloser
     # Direkt-HTTP gegen waiting-od.php (wie KOELN_EVENTS), DL-DE/Zero 2.0 = Tier A.
     # Reine Live-Daten (kein Archiv). Wert ASCII-lowercase (StrEnum), kein Umlaut.
@@ -424,10 +366,6 @@ class SourceId(StrEnum):
     # P+R Hessen (ivm GmbH, Mobilithek DATEX II, LICENSE_FREE_USE_OPEN_DATA ->
     # DL-DE/BY 2.0 = Tier A). Gated (Cert + Abo), Default False.
     PR_HESSEN_PARKING = "pr_hessen_parking"
-    # DB BahnPark (~315 Bahnhof-Parkhaeuser bundesweit, DB API Marketplace,
-    # Header-Auth db_client_id/db_api_key, DL-DE/BY 2.0 = Tier A). Gated, Default
-    # False (Owner-Subscription noetig).
-    DB_BAHNPARK = "db_bahnpark"
     # Stadt-OpenData-Direktquellen (keylos, je Ursprung lizenzverifiziert): loesen
     # die bei ParkenDD eingefrorenen Staedte durch Direktbezug wieder live.
     MUENSTER_PARKING = "muenster_parking"

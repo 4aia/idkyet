@@ -15,7 +15,7 @@ dessen normalisiertes JSON unverändert zurück (kanonischer `{data, meta}`-
 Envelope). Es gibt keine eigene Mapping-, Lizenz- oder Schreib-Logik im
 MCP-Server, keine Datenbank und keinen Zustand. Er bündelt offene Daten zu 84
 deutschen Städten (Wetter, ÖPNV, Luft, Verkehr, Demografie, öffentliche
-Auftragsvergabe und mehr) über 12 schlanke MCP-Tools, die zusammen 66
+Auftragsvergabe und mehr) über 11 schlanke MCP-Tools, die zusammen 44
 Datenarten abdecken. Das hält den Token-Footprint im Kontextfenster des
 Agenten minimal, bleibt weit unter den Tool-Limits gängiger Clients (z.B. 80
 Tools in Cursor), und die Datenbreite wächst weiter, ohne dass neue Tools
@@ -130,35 +130,32 @@ Version erfolgt über den gepinnten Git-Tag bzw. die `uv.lock`.
 
 ## Vollständiges Tool-Manifest
 
-12 Tools, die zusammen 82 Datenarten abdecken. Stadtbezogene Tools erwarten
+11 Tools, die zusammen 44 Datenarten abdecken. Stadtbezogene Tools erwarten
 einen `slug` (z.B. `berlin`, `hamburg`); gültige Slugs liefert `list_cities`.
 Ausnahmen sind unten markiert.
 
 | Tool | Argumente | Beschreibung | Quelle |
 | --- | --- | --- | --- |
 | `get_city` | `slug` | Base data for a German city (population, area, coordinates) | Wikidata |
-| `get_city_overview` | `slug` | One-call overview: base data, a catalog of all 82 data types with coverage status and the matching resource key, plus a live highlights snapshot (weather, air). Discovery entry point | Atlas |
-| `get_city_resource` | `slug`, `resource` | Generic accessor: fetch ANY of the 82 data types by its resource key (kebab-case enum, see list below) | je Datenart |
+| `get_city_overview` | `slug` | One-call overview: base data, a catalog of all 44 data types with coverage status and the matching resource key, plus a live highlights snapshot (weather, air). Discovery entry point | Atlas |
+| `get_city_resource` | `slug`, `resource` | Generic accessor: fetch ANY of the 44 data types by its resource key (kebab-case enum, see list below) | je Datenart |
 | `air_quality` | `slug` | Official air quality (PM10, PM2.5, NO2, O3, SO2) | UBA |
 | `weather` | `slug` | Current weather observations (not a forecast) | DWD |
-| `pois` | `slug`, `type` | Points of interest, filtered by type | OpenStreetMap |
 | `station_board_departures` | `eva` | Live departures of any station by EVA (all categories, incl. local trains + disruptions) | DB Timetables |
 | `station_board_arrivals` | `eva` | Live arrivals of any station by EVA (all categories, incl. local trains + disruptions) | DB Timetables |
 | `transit_departures` | `slug`, `stop_id?` | Live public-transport departures with real-time delays | GTFS-RT/HVV/VGN |
 | `list_cities` | keine | List all covered cities (slug, state, population, coverage) | Atlas |
 | `sources` | keine | List all data sources with license, attribution and status | Atlas |
-| `compare` | `resource`, `cities` | Compare one resource (weather, air, indicators, demographics, unemployment, tourism, charging-status, weather-warnings) across multiple cities | Atlas |
+| `compare` | `resource`, `cities` | Compare one resource (weather, air, demographics, unemployment, tourism, charging-status, weather-warnings) across multiple cities | Atlas |
 
-Das `pois`-Tool nimmt zusätzlich `type` aus der API-Whitelist (z.B. `hospital`,
-`school`, `pharmacy`, `restaurant`, `police`, `kindergarten`).
 `transit_departures` nimmt optional eine `stop_id`.
 
 ### Datenarten: der `resource`-Parameter von `get_city_resource`
 
 Alle Datenarten ohne eigenes Tool holt der Agent über
 `get_city_resource(slug, resource="<schlüssel>")`. Beispiel:
-`get_city_resource(slug="berlin", resource="charging")` liefert die Ladesäulen
-in Berlin. Der `resource`-Parameter ist ein Enum mit 78 Schlüsseln
+`get_city_resource(slug="berlin", resource="parking")` liefert die
+Parkhäuser in Berlin. Der `resource`-Parameter ist ein Enum mit 45 Schlüsseln
 (kebab-case). Welche Schlüssel eine Stadt abdeckt, zeigt
 `get_city_overview(slug)` (je Datenart Schlüssel plus Abdeckungsstatus); die
 Resource `atlas://catalog` listet alle Datenarten. Einige Datenarten haben
@@ -169,7 +166,6 @@ generischen Zugriff erreichbar.
 | --- | --- |
 | `base` | Stammdaten einer Stadt. Eigenes Tool: `get_city` |
 | `overview` | Ein-Aufruf-Überblick mit Katalog und Live-Highlights. Eigenes Tool: `get_city_overview` |
-| `geo` | Geodaten und Verwaltungsgrenzen |
 | `demographics` | Demografische Indikatoren |
 | `population-density` | Einwohnerdichte aus dem Zensus-2022-100m-Gitter |
 | `air-uba` | Amtliche Luftqualität (UBA). Eigenes Tool: `air_quality` |
@@ -180,8 +176,6 @@ generischen Zugriff erreichbar.
 | `pollen-uv` | Pollenflug und UV-Index (Region) |
 | `fire-danger` | Waldbrand- und Graslandfeuer-Index (DWD) |
 | `traffic` | Autobahn-Baustellen und Verkehrsmeldungen (Region) |
-| `transit` | ÖPNV-Haltestellen (statisch) |
-| `charging` | Ladesäulen-Standorte (Bundesnetzagentur) |
 | `charging-status` | Live-Ladesäulen-Belegung je Stadt (eRound, alle 84 Städte) |
 | `road-events` | Innerstädtische Baustellen und Sperrungen (Teilabdeckung) |
 | `parking` | Live-Parkbelegung (Dortmund, Frankfurt am Main, Wuppertal) |
@@ -189,9 +183,6 @@ generischen Zugriff erreichbar.
 | `park-and-ride` | P+R- und B+R-Anlagen: Stellplätze, Preise, ÖPNV-Anbindung, Belegungsprognose (nur München) |
 | `mobility-points` | Mobilitätspunkte und Carsharing-Parkflächen (nur München) |
 | `bike-parking` | Radabstellanlagen: Bestand, Stellplätze, Bauform, Bike-and-Ride (nur München) |
-| `vehicle-registrations` | Pkw-Bestand und Elektroauto-Anteil (KBA) |
-| `accidents` | Verkehrsunfälle je Kreis, jährlich (Unfallatlas) |
-| `crime-stats` | Kriminalstatistik je Hauptstraftatengruppe (BKA PKS) |
 | `fuel-prices` | Aktuelle Spritpreise, aggregiert je Sorte (Tankerkönig) |
 | `sharing` | Bike-/Scooter-Sharing, aggregiert (GBFS, Teilabdeckung) |
 | `bike-counts` | Radzählstellen je Stadt (kommunale Open Data, Teilabdeckung) |
@@ -204,52 +195,19 @@ generischen Zugriff erreichbar.
 | `bathing-water` | Badegewässerqualität im Umkreis (EEA) |
 | `health` | Krankenhausverzeichnis (Regionalstatistik) |
 | `hospitals-atlas` | Krankenhausstandorte aus dem Bundes-Klinik-Atlas |
-| `energy` | Energieanlagen (Marktstammdatenregister) |
 | `power-load` | Tägliche Netzlast der Regelzone (SMARD) |
 | `power-price` | Börsenstrompreis Day-ahead (SMARD) |
 | `solar` | Solar-Einstrahlung und normierter PV-Ertrag je kWp (PVGIS) |
-| `solar-roofs` | Dach-Solarkataster je Stadt (Teilabdeckung) |
-| `district-heating` | Fernwärme und Wärmenetze (kommunale Wärmeplanung, Teilabdeckung) |
 | `unemployment` | Arbeitslose und Arbeitslosenquote je Kreis (Regionalstatistik) |
 | `tourism` | Gästeübernachtungen und Ankünfte je Kreis (Regionalstatistik) |
 | `construction` | Baugenehmigungen je Kreis (Regionalstatistik) |
-| `indicators` | Sozialökonomische Indikatoren je Kreis (INKAR/BBSR) |
-| `sustainability` | Nachhaltigkeit und SDG-Indikatoren je Gemeinde, Zeitreihe 2006-2023 (Wegweiser Kommune, CC0) |
-| `population-structure` | Altersaufbau je Stadt als Zeitreihe: Zahl und Anteil je Altersgruppe, nach Geschlecht und Generation, Ist ab 2006 und Prognose bis 2040 (Wegweiser Kommune, CC0) |
-| `population-trend` | Bevoelkerungsentwicklung als Zeitreihe: Veraenderung der Altersgruppen, Geburten- und Sterberate, Wanderungssaldo (Wegweiser Kommune, CC0) |
-| `municipal-finance` | Kommunale Finanzen als Zeitreihe: Hebesaetze, Steuerkraft, Schulden, Investitionen, Sozialausgaben (Wegweiser Kommune, CC0) |
-| `labour-market` | Arbeitsmarkt und Pendler als Zeitreihe: Arbeitslosen- und Beschaeftigungsquoten, Ein- und Auspendler (Wegweiser Kommune, CC0) |
-| `integration` | Integration als Zeitreihe: Bevoelkerungsanteile, Beschaeftigung, Bildung, Einbuergerungen (Wegweiser Kommune, CC0) |
-| `childcare` | Kinderbetreuung als Zeitreihe: Betreuungsquoten nach Alter, Betreuungsform und Umfang, 83 Staedte (Wegweiser Kommune, CC0) |
-| `education-stats` | Bildungsstatistik als Zeitreihe: Schulabschluesse, Auszubildende, Weiterbildung, 70 Staedte (Wegweiser Kommune, CC0) |
-| `social-situation` | Soziale Lage als Zeitreihe: SGB-II-Quoten, Altersarmut, Grundsicherung, Schuldnerquote (Wegweiser Kommune, CC0) |
-| `care` | Pflege als Zeitreihe: Pflegebeduerftige, Pflegequote, ambulant und stationaer, Vorausberechnung bis 2030, 73 Staedte (Wegweiser, CC0) |
 | `land-values` | Amtliche Bodenrichtwerte, aggregiert (BORIS, Teilabdeckung) |
-| `tax-rates` | Realsteuer-Hebesätze je Gemeinde (Regionalstatistik) |
-| `business-registrations` | Gewerbean-/-abmeldungen und Saldo je Kreis (Regionalstatistik) |
-| `insolvencies` | Beantragte Insolvenzen je Kreis, jährlich (Regionalstatistik) |
 | `public-tenders` | Öffentliche Auftragsvergabe: laufende und vergebene Aufträge (OCDS) |
 | `events` | Veranstaltungen (Teilabdeckung, kommunal) |
 | `webcams` | Verkehrs-Webcams (Region, Teilabdeckung, Autobahn) |
-| `election` | Wahlergebnisse |
-| `holidays` | Feiertage des Bundeslands |
 | `heritage` | Denkmäler/Baudenkmale aus der Landes-Denkmalliste (Berlin) |
 | `office-wait-times` | Behörden-Wartezeiten je Stadt: Live-Wartezeit der Bürgerämter (nur Köln, Teilabdeckung) |
-| `playgrounds` | Öffentliche Spielplätze (OpenStreetMap) |
-| `drinking-water` | Öffentliche Trinkwasserbrunnen (OpenStreetMap) |
-| `public-toilets` | Öffentliche Toiletten (OpenStreetMap) |
-| `markets` | Wochen- und Marktplätze (OpenStreetMap) |
-| `parcel-lockers` | Paketstationen/Locker (OpenStreetMap) |
-| `post-offices` | Postfilialen (OpenStreetMap) |
-| `post-boxes` | Öffentliche Briefkästen mit Leerungszeiten (OpenStreetMap) |
-| `public-wifi` | Öffentliche WLAN-Standorte (OpenStreetMap) |
-| `recycling-centres` | Recycling-/Wertstoffhöfe (OpenStreetMap) |
-| `government-offices` | Behörden und Ämter (OpenStreetMap) |
-| `education` | Bildungseinrichtungen (OpenStreetMap) |
 | `tree-cadastre` | Baumkataster je Stadt (Berlin) |
-
-Points of Interest laufen ausschließlich über das eigene Tool `pois`
-(Pflichtparameter `type`), da der generische Zugriff keinen Typ-Filter kennt.
 
 ## Beispiel-Argumente und echte Ausgaben
 
@@ -279,7 +237,7 @@ city question instead of guessing a single tool:
     "catalog": [
       { "resource": "weather", "tool": "weather", "covered": true },
       { "resource": "air-uba", "tool": "air_quality", "covered": true },
-      { "resource": "solar-roofs", "tool": "get_city_resource", "covered": true }
+      { "resource": "land-values", "tool": "get_city_resource", "covered": true }
     ],
     "highlights": {
       "weather": { "temperature_c": 19.4, "condition": "dry" },
@@ -371,7 +329,7 @@ Agent -> Tool: get_city_overview(slug="koeln")
 Tool  -> Agent: { "data": { "base": { "population": 1073096, ... },
                   "catalog": [ { "resource": "weather", "tool": "weather", "covered": true },
                                { "resource": "public-tenders", "tool": "get_city_resource", "covered": true },
-                               ... 62 weitere Datenarten ... ] },
+                               ... 42 weitere Datenarten ... ] },
                   "meta": { "source_status": "ok" } }
 
 Agent: Zu Köln gibt es u.a. Wetter, Luftqualität, ÖPNV, Verkehr, öffentliche

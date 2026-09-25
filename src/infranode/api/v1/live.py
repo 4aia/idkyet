@@ -1297,8 +1297,7 @@ async def live_transit_departures(
             "Ungueltige oder fehlende stop_id.",
             hint=(
                 "Erwartet wird eine Halt-ID im DELFI-Muster 'de:<AGS>:<id>' "
-                "oder eine numerische gtfs.de-Halt-ID; gueltige IDs liefert "
-                "GET /api/v1/cities/{slug}/transit (Feld stop_id). Haeufige "
+                "oder eine numerische gtfs.de-Halt-ID. Haeufige "
                 "Verwechslung: die stop_id aus /stations/{eva}/departures bzw. "
                 "/cities/{slug}/station-departures bezeichnet EINEN HALT EINER "
                 "ZUGFAHRT (z. B. '-1203677609210685804-2607251113-13') und ist "

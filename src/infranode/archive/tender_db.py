@@ -4,3 +4,7 @@ from __future__ import annotations
 
 def read_public_tenders(*args, **kwargs):
     return []
+
+
+def search_public_tenders(*args, **kwargs):
+    return []

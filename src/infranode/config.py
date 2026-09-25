@@ -207,24 +207,9 @@ class SourceToggleSettings(BaseSettings):
     # Phase 4/6: Basis-Quellen.
     enable_wikidata: bool = True
     enable_dwd: bool = True
-    # OSM/POI-Datenart-Toggle (Name historisch "overpass"). Seit der Overpass-
-    # Ablösung lesen die Routen read-only aus dem osm_pois-Store (Precompute via
-    # ingest.osm_pois); enable_overpass=false -> 200 source_status="disabled".
-    enable_overpass: bool = True
-    # Audit K9: Element-Limit der OSM-Stichprobe (POIs + alle Feature-Datenarten).
-    # Früher hart 200 -> kappte ~67-87% aller Objekte still (Köln Spielplätze 200
-    # statt 1540). Default 2000; der echte Gesamtbestand kommt unabhängig über
-    # ``count_pois`` als ``total_available`` + ``truncated``-Flag. Die Route reicht
-    # diesen Wert als ``limit`` an ``read_pois`` durch. Per
-    # overpassMaxElements anpassbar.
-    overpass_max_elements: int = 2000
     enable_autobahn: bool = True
-    enable_hvv: bool = False
-    enable_delfi: bool = False
     # Phase 7: keylose, bundesweite Tier-A-Quellen (Default True analog enable_dwd).
-    # enable_lhp = Hochwasser (Record-Tag lhp). enable_bnetza steuert NUR die
-    # /charging-Route (Snapshot-Read aus offline CSV seit dem ArcGIS-Aus, nicht live).
-    enable_bnetza: bool = True
+    # enable_lhp = Hochwasser (Record-Tag lhp).
     enable_uba: bool = True
     enable_pegelonline: bool = True
     enable_lhp: bool = True
@@ -264,30 +249,16 @@ class SourceToggleSettings(BaseSettings):
     )
     # Phase 8: account-gated Quellen Default False (bis Credentials gesetzt sind);
     # keylose Bulk-/Seed-Quellen Default True (Toggle steuert nur die Route, nicht
-    # den Offline-Ingest). enable_genesis = Demografie + Krankenhaus, enable_zensus
-    # = Zensus-Host.
+    # den Offline-Ingest). enable_genesis = Demografie + Krankenhaus.
     enable_genesis: bool = False
     # GENESIS-Regionalstatistik-Trio (Arbeitslosenquote/Tourismus/Bautaetigkeit je
     # Kreis, DATA-28). Eigener Toggle mit korrektem Header-Auth-Adapter, ohne den
     # Demografie-Pfad zu berühren. Braucht dieselben genesis_username/-password.
     enable_genesis_regio: bool = True
-    enable_zensus: bool = False
-    enable_mastr: bool = True
     # SMARD-Strommarktdaten (Verbrauch/Netzlast + Day-ahead-Preis), keylos CC BY 4.0.
     enable_smard: bool = True
     # DWD-Wetterwarnungen (amtliche Warnungen, WarnApp-JSON), keylos GeoNutzV.
     enable_dwd_warnings: bool = True
-    # KBA Pkw-Bestand + Elektro-Anteil je Zulassungsbezirk (Bulk, keylos DL-DE/BY).
-    enable_kba: bool = True
-    # Unfallatlas (Straßenverkehrsunfälle je Kreis, Bulk-CSV, keylos DL-DE/BY).
-    enable_unfallatlas: bool = True
-    # INKAR/BBSR sozialökonomische Indikatoren je Kreis (Bulk, keylos DL-DE/BY).
-    enable_inkar: bool = True
-    # Wegweiser Kommune (Bertelsmann Stiftung, CC0): Indikator-ZEITREIHEN je
-    # Gemeinde (Bulk, keylos). Jahresdaten, ergänzt INKAR um die Historie.
-    enable_wegweiser: bool = True
-    # BKA-PKS Kriminalstatistik je Kreis (Bulk-XLSX, keylos DL-DE/BY, Tier A).
-    enable_bka_pks: bool = True
     # Tankerkönig Spritpreise (MTS-K, CC BY 4.0). KEYED: Default True, aber ohne
     # tankerkoenig_key liefert die Route 200 disabled. Toggle-Name == SourceId.
     enable_tankerkoenig: bool = True
@@ -303,17 +274,10 @@ class SourceToggleSettings(BaseSettings):
     # DATA-36: StaDa Station Data (Bahnhofs-Katalog je Stadt). Keyed über denselben
     # DB-API-Marketplace wie db_timetables (db_client_id/db_api_key, kein eigener Key).
     enable_stada: bool = True
-    # DATA-37: Regionalstatistik.de (Realsteuer-Hebesätze 71231 + Gewerbean-/
-    # -abmeldungen 52311). Bulk-Ingest -> SQLite (Read-only im Request-Pfad); ohne
-    # regio_user/regio_pass 200 disabled (Daten könnten nie ingestet werden).
-    enable_regionalstatistik: bool = True
     # DATA-38 (Stufe 1): PVGIS-Solar (EU JRC PVcalc, keylose Live-Rechen-API). PVGIS
     # rechnet jede EU-Koordinate -> alle Register-Städte abgedeckt. Keylos ->
     # Default True. Toggle-Name == SourceId.SOLAR == _KNOWN_SOURCES-Eintrag.
     enable_solar: bool = True
-    # DATA-39 (Stufe 2): Dach-Solarkataster je Stadt (Seed-basiert, NRW-Pilot,
-    # DL-DE/Zero 2.0). Teilabgedeckt (NRW), föderiert je Bundesland wie BORIS.
-    enable_solar_cadastre: bool = True
     # DATA-40: München Open Data (CKAN, keylos, DL-DE/BY 2.0). parkhäuser =
     # statischer Parkhaus-Standortkatalog; radzähl = Raddauerzählstellen
     # (monatlich aktualisiert). Beide keylos -> Default True. Teilabgedeckt
@@ -432,18 +396,6 @@ class SourceToggleSettings(BaseSettings):
     # Phase 21: Öffentliche Auftragsvergabe je Stadt (oeffentlichevergabe.de OCDS,
     # CC0 = Tier A). Bulk-Download, keylos. Default True.
     enable_oeffentlichevergabe: bool = True
-    # DATA-41: Fernwärme-/Wärmenetz-Versorgung je Stadt (kommunale Wärmeplanung,
-    # föderiert je Stadt-WFS, keylos). Default True. Coverage-gated
-    # (registry.coverage), nur verifizierte offen lizenzierte Städte (berlin/hamburg).
-    enable_district_heating: bool = True
-    enable_bkg: bool = True
-    enable_bundeswahl: bool = True
-    enable_holidays: bool = Field(
-        default=True,
-        validation_alias=AliasChoices(
-            "enableHolidays", "enableFeiertage"
-        ),
-    )
     # Phase 9: keylose Stadt-Verkehrs-Quellen (Baustellen/Sperrungen) je Stadt +
     # Autobahn-Webcam-Sub-Service. Alle keylos, daher Default True.
     enable_berlin_viz: bool = True
@@ -579,11 +531,11 @@ class SourceToggleSettings(BaseSettings):
     # warnings). KEYLOS (GET warnung.bund.de/api31/dashboard/{ARS}.json, wie
     # enable_dwd_warnings) -> Default True. Toggle-Name == SourceId-Wert.
     enable_bbk_nina: bool = True
-    # Quick-260708-tsv: kommunale Ratsinformationen (council-papers, OParl) der fünf
-    # lizenzgeklärten Städte. Default FALSE (default-off): der Owner schaltet die
-    # Quelle erst frei, wenn der erste Batch-Ingest gelaufen ist und der Store
-    # befüllt wurde. Toggle-Name == SourceId-Wert "council".
-    enable_council: bool = False
+    # Quick-260708-tsv: kommunale Ratsinformationen (council-papers, OParl) der acht
+    # lizenzgeklärten Städte. GENUINELY LIVE (Cleanup 260925): die Route ruft
+    # adapters.oparl.fetch_papers direkt pro Request auf (kein Batch-Ingest mehr) ->
+    # Default TRUE. Toggle-Name == SourceId-Wert "council".
+    enable_council: bool = True
     # DATA-31: Bremen Baustellen (Mobilithek DATEX II Situation, DL-DE/BY 2.0).
     enable_bremen_roadworks: bool = Field(
         default=False,
@@ -642,17 +594,6 @@ class SourceToggleSettings(BaseSettings):
     # Hamburg-Parken via keylosem WFS geodienste.hamburg.de/wfs_parkhaeuser (umgeht
     # den api.hamburg.de-Box-IP-Block). dl-de/by-2.0 = Tier A, keylos -> Default True.
     enable_hamburg_parking: bool = True
-    # DB BahnPark (~309 Bahnhof-Parkhaeuser bundesweit, DB API Marketplace,
-    # DL-DE/BY 2.0, Tier A). STATISCHER Katalog (free=None): der Testzugang erlaubt
-    # nur 1.000 Transaktionen/Monat und liefert Live-Belegung nur als grobe Kategorie,
-    # daher taeglicher Ein-Aufruf-Ingest -> Snapshot, Request-Pfad liest nur den Store.
-    # Subscription frei (2026-07-20), Katalog ist public (Tier A) -> Default True.
-    # Der Request-Pfad braucht KEINE Credentials (Seed/Store); nur der Ingest nutzt
-    # die gemeinsamen db_client_id/db_api_key (Anwendung "InfraNode").
-    enable_db_bahnpark: bool = True
-    # Snapshot des DB-BahnPark-Katalogs (vom taeglichen Ingest geschrieben; fehlt er,
-    # faellt der Loader auf den committeten Seed data/seeds/db_bahnpark_parking.json).
-    db_bahnpark_store_path: str = "data/db_bahnpark/db_bahnpark_parking.json"
 
 
 class CredentialSettings(BaseSettings):
@@ -663,13 +604,10 @@ class CredentialSettings(BaseSettings):
     Log. Werte stammen aus der gitignored .env (Env-Namen über den Prefix).
     """
 
-    # Phase 8 GENESIS/Zensus (account-gated POST-API). Feldname genesis_username,
-    # weil der Owner genau genesisUsername (+ _PASSWORD) in der .env
-    # gesetzt hat. Zensus nutzt evtl. einen getrennten Account (eigene Felder).
+    # Phase 8 GENESIS (account-gated POST-API). Feldname genesis_username,
+    # weil der Owner genau genesisUsername (+ _PASSWORD) in der .env gesetzt hat.
     genesis_username: str | None = None
     genesis_password: SecretStr | None = None
-    zensus_user: str | None = None
-    zensus_password: SecretStr | None = None
     # HVV-Geofox-GTI Live-Abfahrten (DATA-24): hvv_api_key = HMAC-Secret, hvv_user =
     # geofox-auth-user. Beide nur in Header/Body des signierten Geofox-Requests.
     hvv_api_key: SecretStr | None = None
@@ -686,11 +624,6 @@ class CredentialSettings(BaseSettings):
     # DB-Client-Id/DB-Api-Key. None -> Route 200 disabled.
     db_client_id: SecretStr | None = None
     db_api_key: SecretStr | None = None
-    # DATA-37: Regionalstatistik.de GENESIS-Webservice (Header-Auth username/
-    # password). Nur in die Ingest-Request-Header. None -> /tax-rates +
-    # /business-registrations 200 disabled (Bulk könnte nie ingestet werden).
-    regio_user: SecretStr | None = None
-    regio_pass: SecretStr | None = None
 
 
 class MobilithekSettings(BaseSettings):
@@ -818,7 +751,6 @@ class BulkPathSettings(BaseSettings):
 
     # GTFS-ZIPs für den Batch-Ingest (DATA-05). None = Batch bricht mit Exit 2 ab.
     delfi_gtfs_path: str | None = None
-    hvv_gtfs_path: str | None = None
     # Phase 19: SEPARATER Statik-Pfad für die GTFS-RT-Auflösung. Der gtfs.de-Free-
     # Feed referenziert die gtfs.de-EIGENE Statik (numerische IDs, CC-BY-SA Tier B,
     # wöchentlich via transit.refresh erneuert). Darf NICHT auf das DELFI-Zip
@@ -830,25 +762,8 @@ class BulkPathSettings(BaseSettings):
     # Anreicherung (die Abfahrten funktionieren dann mit null-Liniennamen, ehrliche
     # Degradation, kein Crash). stop_times.txt wird NIE geladen (Speicher-Schutz).
     vbb_gtfs_static_path: str | None = None
-    # Phase 8: Bulk-Dateien für den Offline-Ingest (None = Batch bricht mit Exit 2 ab).
-    mastr_zip_path: str | None = None
-    bkg_path: str | None = None
-    bundeswahl_csv_path: str | None = None
-    # KBA-Bulk (DATA-27): None = Batch holt den Datensatz direkt keylos vom KBA-Portal.
-    kba_source_path: str | None = None
-    # Unfallatlas-Bulk (DATA-29): None = Batch holt das jüngste Jahr vom NRW-Portal.
-    unfallatlas_source_path: str | None = None
-    # INKAR-Bulk (DATA-32): None = Batch holt die Indikatoren live von www.inkar.de.
-    inkar_source_path: str | None = None
-    # Wegweiser-Bulk: None = Batch holt den Bestand live von wegweiser-kommune.de.
-    wegweiser_source_path: str | None = None
-    # BKA-PKS-Bulk (PKS-02): None = Batch probt das jüngste Jahr live von www.bka.de.
-    bka_pks_source_path: str | None = None
     # BORIS-Bulk (DATA-35): None = Batch holt die Bodenrichtwerte live vom Landes-WFS.
     boris_source_path: str | None = None
-    # Regionalstatistik-Bulk (DATA-37): None = Batch holt die Tabellen live vom
-    # GENESIS-Webservice (regio_user/regio_pass).
-    regio_source_path: str | None = None
 
 
 class MonitoringSettings(BaseSettings):
@@ -953,7 +868,7 @@ class Settings(
     # SourceId-Namen) tragen validation_alias=AliasChoices(neu, alt), damit die
     # produktiven .env-Dateien mit den alten Namen (jetzt ebenfalls camelCase)
     # weiter gelten. Ohne populate_by_name koennten Tests/Code diese Felder
-    # nicht mehr per Feldname (Settings(enable_holidays=False)) setzen.
+    # nicht mehr per Feldname (Settings(enable_koeln_wait_times=False)) setzen.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="",

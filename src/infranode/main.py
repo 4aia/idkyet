@@ -412,12 +412,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         # GPT-Action per ntfy verfolgen (feuert nur bei erkanntem ChatGPT-
         # Traffic). Eigene Kapselung, best-effort, crasht den Request nie.
         try:
-            await note_gpt_action(
-                request,
-                redis=request.app.state.redis,
-                settings=request.app.state.settings,
-                status_code=response.status_code,
-            )
+            pass  # GPT-Action-Telemetrie ist privat (entfernt im Public-Build)
         except Exception as exc:
             log.debug("gpt_action_middleware_failed", error=str(exc))
 

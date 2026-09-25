@@ -99,16 +99,13 @@ _DEFAULT_TTL: tuple[float, float] = (60.0, 120.0)
 # (registry/source_specs.py). Quellen ohne Eintrag nutzen _DEFAULT_TTL.
 _SOURCE_TTL: dict[str, tuple[float, float]] = dict(_REGISTRY_TTL)
 
-# --- Frische-Jitter (Overpass-Auto-Bann-Fix 2026-07-18) ------------------------
-# Exakt gleiche fresh-TTLs lassen alle Keys einer Sweep-Generation im selben
-# Moment ablaufen -> der naechste Tageslauf will ALLE gleichzeitig upstream
-# erneuern, die Overpass-Kosten-Quote gibt nur einen Bruchteil her und der Rest
-# erzeugt 429er. Genau diese 400/406/429-Serien zaehlt der automatisierte Bann
-# des Betreibers (Antwort FOSSGIS/M. Spreng 2026-07-17; Volumen/Abstand/UA sind
-# laut Betreiber ok). +-40% Streuung verteilt die Ablaufzeitpunkte einer
-# Generation ueber mehrere Tage (bei 7d fresh: ~4,2 bis ~9,8 Tage), sodass je
-# Tageslauf nur ein Bruchteil der Keys upstream erneuert wird.
-_TTL_JITTER_SOURCES = frozenset({"overpass"})
+# --- Frische-Jitter -------------------------------------------------------
+# +-40% Streuung verteilt die Ablaufzeitpunkte einer Sweep-Generation ueber
+# mehrere Tage, damit nicht alle Keys eines Tageslaufs im selben Moment
+# ablaufen und gleichzeitig upstream erneuert werden wollen. Aktuell keine
+# Quelle eingetragen (die fruehere Overpass-Nutzung entfiel mit dem Cleanup
+# 260925: keine client.fetch("overpass", ...)-Aufrufe mehr im Code).
+_TTL_JITTER_SOURCES: frozenset[str] = frozenset()
 _TTL_JITTER_RANGE = (0.6, 1.4)
 
 
@@ -127,12 +124,6 @@ def _jittered_fresh(source: str, ttl_fresh: float) -> float:
 # Wikidata-WDQS-Endpoint erlaubt nur ~5 parallele Queries/IP. Tankerkönig läuft
 # ON-DEMAND ohne Redis-Cache (store=False, ToS) -> jeder Nutzer-Request wird ein
 # Upstream-Call; alle Nutzer teilen sich EINEN API-Key, daher hart deckeln.
-# Overpass (overpass-api.de, Fair-Use): nominell 2 Slots je IP, aber die Slots
-# haben eine Kosten-Quote mit Abkühlzeit. Ein POI-Sweep riss am 2026-07-11 mit
-# ungebremsten Parallel-Refreshes das Limit (429-Serie -> Breaker OPEN), und am
-# 2026-07-16 leerte selbst 2 parallel + 1s Abstand die Slot-Quote nach wenigen
-# Dutzend Queries erneut (429-Serie). Daher strikt seriell mit großem Abstand;
-# der zweite Slot bleibt als Puffer für die Slot-Ökonomie ungenutzt.
 # genesis (www.regionalstatistik.de, Header-Auth mit EINEM geteilten Credential):
 # Demografie + das GENESIS-Regio-Trio (unemployment/tourism/construction) fetchen
 # alle über die "genesis"-Fassade. Der Endpunkt ist langsam und credential-geteilt;
@@ -144,40 +135,25 @@ def _jittered_fresh(source: str, ttl_fresh: float) -> float:
 _SOURCE_MAX_CONCURRENCY: dict[str, int] = {
     "wikidata": 5,
     "tankerkoenig": 2,
-    "overpass": 1,
     "genesis": 3,
 }
 # Mindestabstand (Sekunden) zwischen Upstream-Calls je Quelle (Aggregat-Rate).
 # DB-Timetables-ToS: <=60 Aufrufe/Minute -> >=1.0s. Tankerkönig: Key-Sperrung bei
 # exzessiven Abfragen, cachen dürfen wir nicht -> Aggregat auf <=60/min drosseln.
-# Overpass: <=15/min Aggregat (4s Abstand), damit die Slot-Kosten-Quote des
-# öffentlichen Servers auch bei langen Sweeps nicht abgeräumt wird (1s Abstand
-# reichte am 2026-07-16 NICHT, 429 nach wenigen Dutzend Queries). POIs sind
-# ohnehin lange gecacht, das Pacing trifft nur kalte Keys, Collector-Warm-Jobs
-# und SWR-Background-Refreshes; der nächtliche Warm-Sweep wird dadurch langsam
-# (~90 min), was gewollt ist.
 # Quellen ohne Eintrag: kein Limit. Geteilte Keys -> Aggregat begrenzen.
 _SOURCE_MIN_INTERVAL_S: dict[str, float] = {
     "db_timetables": 1.0,
     "tankerkoenig": 1.0,
-    "overpass": 4.0,
 }
 
 # --- 429-Cooldown je Quelle (Quota-Signal, KEIN Gesundheitssignal) ------------
-# Overpass drosselt nach einem KOSTEN-Budget je IP: große Stadt-BBox-Queries sind
-# teuer, das Budget erholt sich langsamer, als ein Dauerlauf es verbraucht. Der
-# Warm-Sweep (17 tägliche osm-Jobs) bekam am 2026-07-16 trotz 1 parallel + 4s
-# Mindestabstand ~15% HTTP 429 -> Route-503-Wellen im errlog/ntfy. Ein 429 ist
-# hier ein QUOTA-Signal (Server lebt, Budget leer), kein Ausfall; deshalb setzt
-# er eine quellen-globale Cooldown-Sperre statt den Breaker zu füttern.
-# Wert = Default-Cooldown-Sekunden je Quelle; nur eingetragene Quellen nehmen
-# an der Cooldown-Logik teil, alle anderen verhalten sich exakt wie bisher.
-# Parameter (Owner-Rahmen 2026-07-16): 30s Default (liegt bewusst über dem
-# 12s-Warte-Deckel, der Collector überbrückt via run_with_retry 0/10/30s),
-# Faktor 2 je Folge-429, Kappe 120s (gilt auch für Retry-After-Header).
-_SOURCE_429_COOLDOWN: dict[str, float] = {
-    "overpass": 30.0,
-}
+# Ein 429 ist ein QUOTA-Signal (Server lebt, Budget leer), kein Ausfall; deshalb
+# setzt er (fuer eingetragene Quellen) eine quellen-globale Cooldown-Sperre statt
+# den Breaker zu fuettern. Wert = Default-Cooldown-Sekunden je Quelle; nur
+# eingetragene Quellen nehmen an der Cooldown-Logik teil, alle anderen verhalten
+# sich exakt wie bisher. Aktuell keine Quelle eingetragen (die fruehere
+# Overpass-Nutzung entfiel mit dem Cleanup 260925).
+_SOURCE_429_COOLDOWN: dict[str, float] = {}
 # Warte-Deckel im Request-Pfad: kurze Restsperren werden abgewartet (Sweep-Jobs
 # laufen dann ohne Fehler weiter), längere werfen sofort SourceCooldownActive
 # (interaktive Requests hängen nie minutenlang; bleibt unter Collector-read=60s

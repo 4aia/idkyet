@@ -52,12 +52,12 @@ def _delegated_resources() -> dict:
     Zweiter Zweig neben RESOURCE_MAP: statt eines Adapter-Fetches wird der
     EXISTIERENDE Route-Handler je Stadt aufgerufen (identisches Verhalten
     inkl. Toggles, Fallbacks, no_data/not_ingested und Attribution; keine
-    Logik-Duplikate). Nur billige Kandidaten sind gelistet: Store-Reads
-    (indicators), gecachte Quellen (GENESIS-Regio, DWD-Warnungen: EIN
-    bundesweiter Fetch fuer alle Staedte) und der Redis-Join
-    (charging-status). BEWUSST NICHT dabei: fuel-prices (die Tankerkoenig-
-    Bedingungen verlangen Requests on demand und begrenzen auf 1 Request/Minute;
-    ein 28-Staedte-Fan-out je Request waere genau die untersagte Massenabfrage).
+    Logik-Duplikate). Nur billige Kandidaten sind gelistet: gecachte Quellen
+    (GENESIS-Regio, DWD-Warnungen: EIN bundesweiter Fetch fuer alle Staedte)
+    und der Redis-Join (charging-status). BEWUSST NICHT dabei: fuel-prices (die
+    Tankerkoenig-Bedingungen verlangen Requests on demand und begrenzen auf 1
+    Request/Minute; ein 28-Staedte-Fan-out je Request waere genau die
+    untersagte Massenabfrage).
 
     Lazy als Funktion statt Modul-Konstante: cities.py importiert beim Laden
     viel Adapter-Geflecht; der lokale Import vermeidet Import-Zyklen ueber
@@ -66,7 +66,6 @@ def _delegated_resources() -> dict:
     from infranode.api.v1 import cities as city_routes
 
     return {
-        "indicators": city_routes.city_indicators,
         "demographics": city_routes.city_demographics,
         "unemployment": city_routes.city_unemployment,
         "tourism": city_routes.city_tourism,

@@ -127,189 +127,6 @@
       ]
     },
     {
-      "id": "indicators",
-      "endpoint": "indicators",
-      "theme": "REGI",
-      "source": "inkar",
-      "title_de": "Regionalindikatoren (INKAR)",
-      "title_en": "Regional indicators (INKAR)",
-      "desc_de": "Sozieoekonomische Regionalindikatoren je Kreis/Stadt aus INKAR/BBSR.",
-      "desc_en": "Socioeconomic regional indicators per district/city from INKAR/BBSR.",
-      "keywords": [
-        "INKAR",
-        "BBSR",
-        "Indikatoren",
-        "Region"
-      ]
-    },
-    {
-      "id": "sustainability",
-      "endpoint": "sustainability",
-      "theme": "ENVI",
-      "source": "wegweiser",
-      "title_de": "Nachhaltigkeit und SDG-Indikatoren",
-      "title_en": "Sustainability and SDG indicators",
-      "desc_de": "Kommunale Nachhaltigkeits- und SDG-Indikatoren je Gemeinde als Zeitreihe (Ist-Daten ab 2006) aus dem Wegweiser Kommune der Bertelsmann Stiftung, CC0.",
-      "desc_en": "Municipal sustainability and SDG indicators per municipality as a time series (actuals from 2006) from Wegweiser Kommune by Bertelsmann Stiftung, CC0.",
-      "keywords": [
-        "Nachhaltigkeit",
-        "sustainability",
-        "SDG",
-        "Wegweiser Kommune",
-        "Zeitreihe"
-      ]
-    },
-    {
-      "id": "population-structure",
-      "endpoint": "population-structure",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Altersaufbau der Bevölkerung",
-      "title_en": "Population age structure",
-      "desc_de": "Altersaufbau je Gemeinde als Zeitreihe: Zahl und Anteil je Altersgruppe, nach Geschlecht und Generation, Ist-Daten ab 2006 und Prognose bis 2040.",
-      "desc_en": "Age structure per municipality as a time series: count and share per age group, by gender and generation, actuals from 2006 and forecast to 2040.",
-      "keywords": [
-        "Demografie",
-        "Altersstruktur",
-        "population",
-        "age structure",
-        "Prognose"
-      ]
-    },
-    {
-      "id": "population-trend",
-      "endpoint": "population-trend",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Bevölkerungsentwicklung",
-      "title_en": "Population trend",
-      "desc_de": "Bevölkerungsentwicklung je Gemeinde als Zeitreihe: Veränderung der Altersgruppen, Geburten- und Sterberate, Wanderungssaldo.",
-      "desc_en": "Population trend per municipality as a time series: change in age groups, birth and death rates, migration balance.",
-      "keywords": [
-        "Bevölkerungsentwicklung",
-        "Wanderung",
-        "population trend",
-        "migration"
-      ]
-    },
-    {
-      "id": "municipal-finance",
-      "endpoint": "municipal-finance",
-      "theme": "GOVE",
-      "source": "wegweiser",
-      "title_de": "Kommunale Finanzen",
-      "title_en": "Municipal finances",
-      "desc_de": "Kommunale Finanzkennzahlen je Gemeinde als Zeitreihe: Hebesätze, Steuereinnahmekraft, Schulden, Investitionen, Sozialausgaben.",
-      "desc_en": "Municipal finance indicators per municipality as a time series: tax multipliers, tax revenue capacity, debt, investment, social spending.",
-      "keywords": [
-        "Finanzen",
-        "Hebesatz",
-        "Gewerbesteuer",
-        "municipal finance",
-        "debt"
-      ]
-    },
-    {
-      "id": "labour-market",
-      "endpoint": "labour-market",
-      "theme": "ECON",
-      "source": "wegweiser",
-      "title_de": "Arbeitsmarkt und Pendler",
-      "title_en": "Labour market and commuters",
-      "desc_de": "Arbeitsmarkt je Gemeinde als Zeitreihe: Arbeitslosen- und Beschäftigungsquoten, geringfügige Beschäftigung, Ein- und Auspendler.",
-      "desc_en": "Labour market per municipality as a time series: unemployment and employment rates, marginal employment, in- and out-commuters.",
-      "keywords": [
-        "Arbeitsmarkt",
-        "Pendler",
-        "labour market",
-        "commuters",
-        "employment"
-      ]
-    },
-    {
-      "id": "integration",
-      "endpoint": "integration",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Integration",
-      "title_en": "Integration",
-      "desc_de": "Integrationskennzahlen je Gemeinde als Zeitreihe: Bevölkerungsanteile, Beschäftigung, Arbeitslosigkeit, Bildung, Einbürgerungen.",
-      "desc_en": "Integration indicators per municipality as a time series: population shares, employment, unemployment, education, naturalisations.",
-      "keywords": [
-        "Integration",
-        "Migration",
-        "Einbürgerung",
-        "integration",
-        "migration"
-      ]
-    },
-    {
-      "id": "childcare",
-      "endpoint": "childcare",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Kinderbetreuung",
-      "title_en": "Childcare",
-      "desc_de": "Kinderbetreuung je Gemeinde als Zeitreihe: Betreuungsquoten nach Alter, Betreuungsform und Umfang. Teilabdeckung (83 Städte).",
-      "desc_en": "Childcare per municipality as a time series: care rates by age, type of care and hours. Partial coverage (83 cities).",
-      "keywords": [
-        "Kinderbetreuung",
-        "Kita",
-        "childcare",
-        "day care"
-      ]
-    },
-    {
-      "id": "education-stats",
-      "endpoint": "education-stats",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Bildungsstatistik",
-      "title_en": "Education statistics",
-      "desc_de": "Bildungsstatistik je Kreis/kreisfreie Stadt als Zeitreihe: Schulabschlüsse, Auszubildende, Weiterbildung. Teilabdeckung (70 Städte).",
-      "desc_en": "Education statistics per district/independent city as a time series: school qualifications, apprentices, further education. Partial coverage (70 cities).",
-      "keywords": [
-        "Bildung",
-        "Schulabschluss",
-        "Ausbildung",
-        "education",
-        "school"
-      ]
-    },
-    {
-      "id": "social-situation",
-      "endpoint": "social-situation",
-      "theme": "SOCI",
-      "source": "wegweiser",
-      "title_de": "Soziale Lage",
-      "title_en": "Social situation",
-      "desc_de": "Soziale Lage je Gemeinde als Zeitreihe: SGB-II-Quoten, Altersarmut, Grundsicherung, Wohngeld, Schuldnerquote.",
-      "desc_en": "Social situation per municipality as a time series: SGB II rates, old-age poverty, basic income support, housing benefit, over-indebtedness.",
-      "keywords": [
-        "Soziales",
-        "Armut",
-        "SGB II",
-        "social",
-        "poverty"
-      ]
-    },
-    {
-      "id": "care",
-      "endpoint": "care",
-      "theme": "HEAL",
-      "source": "wegweiser",
-      "title_de": "Pflege",
-      "title_en": "Long-term care",
-      "desc_de": "Pflegekennzahlen je Kreis/kreisfreie Stadt als Zeitreihe: Pflegebedürftige, Pflegequote, ambulant und stationär, Vorausberechnung bis 2030. Teilabdeckung (73 Städte).",
-      "desc_en": "Long-term care indicators per district/independent city as a time series: people in need of care, care rate, outpatient and inpatient, forecast to 2030. Partial coverage (73 cities).",
-      "keywords": [
-        "Pflege",
-        "Pflegebedürftige",
-        "long-term care",
-        "nursing"
-      ]
-    },
-    {
       "id": "unemployment",
       "endpoint": "unemployment",
       "theme": "SOCI",
@@ -356,37 +173,6 @@
       ]
     },
     {
-      "id": "vehicle-registrations",
-      "endpoint": "vehicle-registrations",
-      "theme": "TRAN",
-      "source": "kba",
-      "title_de": "Kfz-Zulassungen",
-      "title_en": "Vehicle registrations",
-      "desc_de": "Pkw-Bestand und Elektro-Anteil je Zulassungsbezirk (Kraftfahrt-Bundesamt).",
-      "desc_en": "Car stock and electric share per registration district (KBA).",
-      "keywords": [
-        "Kfz",
-        "vehicles",
-        "KBA",
-        "Elektro"
-      ]
-    },
-    {
-      "id": "accidents",
-      "endpoint": "accidents",
-      "theme": "TRAN",
-      "source": "unfallatlas",
-      "title_de": "Verkehrsunfaelle",
-      "title_en": "Road accidents",
-      "desc_de": "Verkehrsunfaelle je Kreis/Stadt aus dem Unfallatlas der Statistischen Aemter.",
-      "desc_en": "Road accidents per district/city from the official accident atlas.",
-      "keywords": [
-        "Unfaelle",
-        "accidents",
-        "Unfallatlas"
-      ]
-    },
-    {
       "id": "land-values",
       "endpoint": "land-values",
       "theme": "REGI",
@@ -400,23 +186,6 @@
         "land values",
         "BORIS",
         "Immobilien"
-      ]
-    },
-    {
-      "id": "energy-assets",
-      "endpoint": "energy",
-      "theme": "ENER",
-      "source": "mastr",
-      "title_de": "Energieanlagen",
-      "title_en": "Energy assets",
-      "desc_de": "Energieerzeugungsanlagen (PV, Wind, Biogas, Speicher) je Stadt aus dem Marktstammdatenregister.",
-      "desc_en": "Energy generation assets (PV, wind, biogas, storage) per city from the Marktstammdatenregister.",
-      "keywords": [
-        "Energie",
-        "energy",
-        "MaStR",
-        "PV",
-        "Wind"
       ]
     },
     {
@@ -449,22 +218,6 @@
         "fuel",
         "Tankerkoenig",
         "MTS-K"
-      ]
-    },
-    {
-      "id": "charging",
-      "endpoint": "charging",
-      "theme": "ENER",
-      "source": "bnetza",
-      "title_de": "Ladesaeulen",
-      "title_en": "EV charging stations",
-      "desc_de": "Oeffentliche Ladesaeulen je Stadt aus dem Ladesaeulenregister der Bundesnetzagentur.",
-      "desc_en": "Public EV charging stations per city from the Bundesnetzagentur charging register.",
-      "keywords": [
-        "Ladesaeulen",
-        "charging",
-        "EV",
-        "Bundesnetzagentur"
       ]
     },
     {
@@ -501,23 +254,6 @@
       ]
     },
     {
-      "id": "transit",
-      "endpoint": "transit",
-      "theme": "TRAN",
-      "source": "delfi",
-      "title_de": "OEPNV-Haltestellen",
-      "title_en": "Public transit stops",
-      "desc_de": "ÖPNV-Haltestellen je Stadt aus dem bundesweiten DELFI-Datensatz. Live-Abfahrten für Berlin kommen bevorzugt vom VBB-GTFS-Realtime-Feed (CC-BY 4.0), sonst aus dem bundesweiten gtfs.de/DELFI-Feed.",
-      "desc_en": "Public transit stops per city from the nationwide DELFI dataset. Live departures for Berlin are served preferentially from the VBB GTFS-Realtime feed (CC-BY 4.0), otherwise from the nationwide gtfs.de/DELFI feed.",
-      "keywords": [
-        "OEPNV",
-        "transit",
-        "DELFI",
-        "VBB",
-        "Haltestellen"
-      ]
-    },
-    {
       "id": "station-departures",
       "endpoint": "station-departures",
       "theme": "TRAN",
@@ -531,52 +267,6 @@
         "departures",
         "Bahnhof",
         "DB"
-      ]
-    },
-    {
-      "id": "land-boundaries",
-      "endpoint": "geo",
-      "theme": "REGI",
-      "source": "bkg",
-      "title_de": "Verwaltungsgrenzen",
-      "title_en": "Administrative boundaries",
-      "desc_de": "Verwaltungsgrenzen und Flaeche je Stadt (GeoBasis-DE / BKG).",
-      "desc_en": "Administrative boundaries and area per city (GeoBasis-DE / BKG).",
-      "keywords": [
-        "Grenzen",
-        "boundaries",
-        "BKG",
-        "Geo"
-      ]
-    },
-    {
-      "id": "elections",
-      "endpoint": "election",
-      "theme": "GOVE",
-      "source": "bundeswahl",
-      "title_de": "Wahlergebnisse",
-      "title_en": "Election results",
-      "desc_de": "Bundestagswahlergebnisse je Stadt (Die Bundeswahlleiterin).",
-      "desc_en": "Federal election results per city (Federal Returning Officer).",
-      "keywords": [
-        "Wahl",
-        "elections",
-        "Bundestagswahl"
-      ]
-    },
-    {
-      "id": "holidays",
-      "endpoint": "holidays",
-      "theme": "GOVE",
-      "source": "holidays",
-      "title_de": "Feiertage und Schulferien",
-      "title_en": "Public and school holidays",
-      "desc_de": "Gesetzliche Feiertage und Schulferien je Bundesland/Stadt.",
-      "desc_en": "Public holidays and school holidays per state/city.",
-      "keywords": [
-        "Feiertage",
-        "holidays",
-        "Schulferien"
       ]
     },
     {

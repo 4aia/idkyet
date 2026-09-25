@@ -69,19 +69,21 @@ leerer String.
 
 ## Daten
 
-84 Städte, rund 82 Datenarten:
+84 Städte, 44 Datenarten — jede davon ein echter Live-Request pro Abfrage,
+keine Offline-/Batch-Daten:
 
 - **Wetter & Umwelt** — Wetter, Wetterwarnungen, Luftqualität, Pollen/UV,
-  Pegelstände, Hochwasser, Waldbrandgefahr
+  Pegelstände, Hochwasser, Waldbrandgefahr, Badegewässerqualität
 - **Mobilität** — ÖPNV-Echtzeitabfahrten, Bahnhofstafeln, Verkehr, Parken,
-  Ladeinfrastruktur, Sharing, Spritpreise
-- **Stadt & Menschen** — Demografie, Gesundheit, Bildung, Veranstaltungen,
-  Ratsinformationen, Points of Interest
-- **Wirtschaft** — Bodenrichtwerte, Gewerbesteuer, öffentliche Vergabe
-- **Energie & Fahrzeuge** — Strompreis, Solar, Fernwärme, Kfz-Bestand
+  Ladeinfrastruktur (Live-Status), Sharing, Spritpreise
+- **Stadt & Menschen** — Demografie, Gesundheit, Veranstaltungen,
+  Ratsinformationen (live OParl je Stadt), Denkmäler, Baumkataster
+- **Wirtschaft** — Bodenrichtwerte, öffentliche Vergabe
+- **Energie** — Strompreis, Solar-Einstrahlung
 
 Quellen u.a.: Deutscher Wetterdienst, Umweltbundesamt, Deutsche Bahn, VBB,
-SMARD, BORIS, Bundesnetzagentur, KBA, OpenStreetMap, GovData.
+SMARD, BORIS (je Bundesland), nextbike/GBFS, Wikidata, sowie die OParl-Systeme
+einzelner Städte.
 
 ## Lokal laufen lassen
 

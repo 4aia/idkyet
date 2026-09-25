@@ -69,21 +69,21 @@ never an empty string.
 
 ## Data
 
-84 cities, around 82 data types:
+84 cities, 44 data types — every single one a real live request per call, no
+offline/batch data:
 
 - **Weather & environment** — weather, weather warnings, air quality,
-  pollen/UV, water levels, flooding, wildfire risk
+  pollen/UV, water levels, flooding, wildfire risk, bathing water quality
 - **Mobility** — real-time transit departures, station boards, traffic,
-  parking, charging infrastructure, sharing, fuel prices
-- **City & people** — demographics, health, education, events, council
-  records, points of interest
-- **Economy** — land values, business tax rates, public procurement
-- **Energy & vehicles** — electricity prices, solar, district heating,
-  vehicle registrations
+  parking, charging infrastructure (live status), sharing, fuel prices
+- **City & people** — demographics, health, events, council records (live
+  OParl per city), heritage sites, tree cadastre
+- **Economy** — land values, public procurement
+- **Energy** — electricity prices, solar irradiance
 
 Sources include: German Weather Service (DWD), Federal Environment Agency
-(UBA), Deutsche Bahn, VBB, SMARD, BORIS, Bundesnetzagentur, KBA,
-OpenStreetMap, GovData.
+(UBA), Deutsche Bahn, VBB, SMARD, BORIS (per federal state), nextbike/GBFS,
+Wikidata, and individual cities' own OParl systems.
 
 ## Running it locally
 
